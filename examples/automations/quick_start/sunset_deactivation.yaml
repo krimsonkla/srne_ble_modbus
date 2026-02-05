@@ -1,0 +1,44 @@
+# Sunset Deactivation
+# Turns off inverter after sunset when PV production ends
+#
+# Requirements:
+# - switch.srne_inverter_power (Inverter power switch)
+# - sensor.srne_inverter_pv_power (PV power sensor)
+# - sun.sun (Home Assistant sun integration)
+#
+# Usage:
+# 1. Copy this file to your config/automations directory
+# 2. Ensure sun integration is configured
+# 3. Adjust offset and PV threshold if needed
+# 4. This waits until PV drops to 0W before turning off
+
+automation:
+  - alias: "SRNE: Sunset Deactivation"
+    description: "Turn off inverter after sunset when PV production stops"
+
+    trigger:
+      - platform: sun
+        event: sunset
+        offset: "+01:00:00"  # 1 hour after sunset
+
+    condition:
+      - condition: state
+        entity_id: switch.srne_inverter_power
+        state: "on"
+
+      - condition: numeric_state
+        entity_id: sensor.srne_inverter_pv_power
+        below: 10  # Less than 10W production
+
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.srne_inverter_power
+
+      - service: notify.notify
+        data:
+          title: "Inverter Sunset Shutdown"
+          message: >
+            SRNE inverter deactivated after sunset.
+            PV Production Today: {{ states('sensor.srne_inverter_pv_energy_today') }} kWh
+            Battery SOC: {{ states('sensor.srne_inverter_battery_soc') }}%

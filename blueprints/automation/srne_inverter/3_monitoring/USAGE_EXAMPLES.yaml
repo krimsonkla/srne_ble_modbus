@@ -1,0 +1,556 @@
+# USAGE EXAMPLES FOR ADVANCED MONITORING BLUEPRINTS
+# Copy and customize these examples for your Home Assistant automations
+
+# ============================================================================
+# EXAMPLE 1: Daily Performance Dashboard - Detailed Configuration
+# ============================================================================
+# This example shows all features enabled with comprehensive tracking
+
+automation:
+  - alias: "SRNE Daily Performance Dashboard - Full Featured"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/daily_performance_dashboard.yaml
+      input:
+        # Device Selection
+        inverter_device: YOUR_SRNE_DEVICE_ID
+
+        # Required Energy Sensors
+        pv_energy_today_sensor: sensor.srne_pv_energy_today
+        battery_charge_today_sensor: sensor.srne_battery_charge_today
+        battery_discharge_today_sensor: sensor.srne_battery_discharge_today
+        battery_soc_sensor: sensor.srne_battery_soc
+
+        # Optional Grid Sensors (highly recommended)
+        grid_import_today_sensor: sensor.grid_import_today
+        grid_export_today_sensor: sensor.grid_export_today
+        load_consumption_today_sensor: sensor.load_consumption_today
+
+        # Battery Health Sensors
+        battery_voltage_sensor: sensor.srne_battery_voltage
+        battery_temperature_sensor: sensor.srne_battery_temperature
+        battery_cycles_sensor: sensor.srne_battery_cycles
+
+        # Historical Comparison Sensors (create with templates)
+        pv_energy_yesterday_sensor: sensor.pv_energy_yesterday
+        pv_energy_7day_avg_sensor: sensor.pv_energy_7day_average
+
+        # Calculation Method (weighted is most accurate)
+        calculation_method: "weighted"
+        battery_efficiency_factor: 0.90  # LiFePO4 typical
+        inverter_efficiency_factor: 0.95  # Modern inverter typical
+
+        # Cost Configuration (adjust for your rates)
+        electricity_buy_rate: 0.12  # USD per kWh
+        electricity_sell_rate: 0.08  # Feed-in tariff
+        currency_symbol: "$"
+
+        # Report Configuration
+        report_time: "23:00:00"  # End of day summary
+        notification_style: "detailed"  # Full analysis
+
+        # Feature Toggles (all enabled)
+        include_comparisons: true
+        include_battery_health: true
+        include_cost_analysis: true
+        include_recommendations: true
+
+        # Notifications
+        notification_service: notify.mobile_app_iphone
+        secondary_notification_service: notify.persistent_notification
+        create_persistent_notification: true
+
+        # Alert Thresholds
+        low_self_sufficiency_threshold: 50
+        high_grid_dependency_threshold: 60
+        battery_cycle_warning_threshold: 3000  # Warn at 3000 cycles
+
+# ============================================================================
+# EXAMPLE 2: Daily Performance Dashboard - Minimal Configuration
+# ============================================================================
+# Basic setup with just essential features
+
+automation:
+  - alias: "SRNE Daily Report - Simple"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/daily_performance_dashboard.yaml
+      input:
+        inverter_device: YOUR_SRNE_DEVICE_ID
+        pv_energy_today_sensor: sensor.srne_pv_energy_today
+        battery_charge_today_sensor: sensor.srne_battery_charge_today
+        battery_discharge_today_sensor: sensor.srne_battery_discharge_today
+        battery_soc_sensor: sensor.srne_battery_soc
+
+        calculation_method: "simple"
+        report_time: "23:00:00"
+        notification_style: "summary"
+        notification_service: notify.mobile_app
+
+        # Minimal features for basic reporting
+        include_comparisons: false
+        include_battery_health: false
+        include_cost_analysis: false
+        include_recommendations: false
+
+# ============================================================================
+# EXAMPLE 3: Daily Performance Dashboard - Cost Focused
+# ============================================================================
+# Emphasizes cost savings and financial metrics
+
+automation:
+  - alias: "SRNE Cost Savings Report"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/daily_performance_dashboard.yaml
+      input:
+        inverter_device: YOUR_SRNE_DEVICE_ID
+        pv_energy_today_sensor: sensor.srne_pv_energy_today
+        battery_charge_today_sensor: sensor.srne_battery_charge_today
+        battery_discharge_today_sensor: sensor.srne_battery_discharge_today
+        grid_import_today_sensor: sensor.grid_import_today
+        grid_export_today_sensor: sensor.grid_export_today
+        battery_soc_sensor: sensor.srne_battery_soc
+
+        calculation_method: "normalized"
+
+        # Cost settings (Time-of-Use rates)
+        electricity_buy_rate: 0.25  # Peak rate
+        electricity_sell_rate: 0.10  # Feed-in tariff
+        currency_symbol: "$"
+
+        report_time: "23:00:00"
+        notification_style: "detailed"
+        notification_service: notify.mobile_app
+
+        # Focus on costs
+        include_comparisons: true
+        include_battery_health: false
+        include_cost_analysis: true
+        include_recommendations: true
+
+# ============================================================================
+# EXAMPLE 4: Seasonal Parameter Adjuster - Northern Hemisphere
+# ============================================================================
+# Standard configuration for US/Europe/Asia locations
+
+automation:
+  - alias: "SRNE Seasonal Adjustment - Northern Hemisphere"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/seasonal_parameter_adjuster.yaml
+      input:
+        inverter_device: YOUR_SRNE_DEVICE_ID
+        battery_temperature_sensor: sensor.srne_battery_temperature
+        ambient_temperature_sensor: sensor.outdoor_temperature
+
+        # Winter: November through April
+        winter_start_month: 11
+        winter_start_day: 1
+        winter_end_month: 4
+        winter_end_day: 30
+
+        # Winter Parameters (Conservative for cold weather)
+        winter_battery_charge_voltage: 55.0  # V
+        winter_battery_float_voltage: 54.0
+        winter_max_charge_current: 40  # A
+        winter_max_discharge_current: 40
+        winter_low_temp_cutoff: 0  # °C
+        winter_energy_priority: "Solar First"
+        winter_battery_type: "Lithium"
+
+        # Summer Parameters (Optimal for warm weather)
+        summer_battery_charge_voltage: 56.0
+        summer_battery_float_voltage: 54.5
+        summer_max_charge_current: 60
+        summer_max_discharge_current: 60
+        summer_high_temp_cutoff: 40
+        summer_energy_priority: "Solar First"
+        summer_battery_type: "Lithium"
+
+        # Temperature Overrides
+        enable_temp_override: true
+        extreme_cold_threshold: -5
+        extreme_heat_threshold: 45
+
+        # Transition (smooth parameter changes)
+        use_transition_period: false
+
+        # Notifications
+        notification_service: notify.mobile_app_iphone
+        notify_on_mode_change: true
+        notify_on_temp_override: true
+
+        check_frequency_hours: 6
+
+# ============================================================================
+# EXAMPLE 5: Seasonal Parameter Adjuster - Southern Hemisphere
+# ============================================================================
+# For Australia, South America, Southern Africa
+
+automation:
+  - alias: "SRNE Seasonal Adjustment - Southern Hemisphere"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/seasonal_parameter_adjuster.yaml
+      input:
+        inverter_device: YOUR_SRNE_DEVICE_ID
+        battery_temperature_sensor: sensor.srne_battery_temperature
+
+        # Winter: May through October
+        winter_start_month: 5
+        winter_start_day: 1
+        winter_end_month: 10
+        winter_end_day: 31
+
+        # Winter Parameters
+        winter_battery_charge_voltage: 55.0
+        winter_battery_float_voltage: 54.0
+        winter_max_charge_current: 40
+        winter_max_discharge_current: 40
+        winter_low_temp_cutoff: 5  # Milder winters
+        winter_energy_priority: "Solar First"
+
+        # Summer Parameters (Dec-Mar)
+        summer_battery_charge_voltage: 56.0
+        summer_battery_float_voltage: 54.5
+        summer_max_charge_current: 60
+        summer_max_discharge_current: 60
+        summer_high_temp_cutoff: 40
+        summer_energy_priority: "Solar First"
+
+        enable_temp_override: true
+        extreme_cold_threshold: 0
+        extreme_heat_threshold: 45
+
+        notification_service: notify.mobile_app
+        notify_on_mode_change: true
+        check_frequency_hours: 6
+
+# ============================================================================
+# EXAMPLE 6: Seasonal Parameter Adjuster - AGM Battery Configuration
+# ============================================================================
+# Conservative settings for AGM/Lead-Acid batteries
+
+automation:
+  - alias: "SRNE Seasonal Adjustment - AGM Battery"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/seasonal_parameter_adjuster.yaml
+      input:
+        inverter_device: YOUR_SRNE_DEVICE_ID
+        battery_temperature_sensor: sensor.srne_battery_temperature
+
+        winter_start_month: 11
+        winter_start_day: 1
+        winter_end_month: 4
+        winter_end_day: 30
+
+        # AGM Winter Settings (more conservative)
+        winter_battery_charge_voltage: 56.0  # AGM needs higher voltage
+        winter_battery_float_voltage: 54.5
+        winter_max_charge_current: 30  # Lower current for AGM
+        winter_max_discharge_current: 35
+        winter_low_temp_cutoff: 5  # AGM more sensitive to cold
+        winter_energy_priority: "Solar First"
+        winter_battery_type: "AGM"
+
+        # AGM Summer Settings
+        summer_battery_charge_voltage: 57.0
+        summer_battery_float_voltage: 55.0
+        summer_max_charge_current: 40
+        summer_max_discharge_current: 45
+        summer_high_temp_cutoff: 35  # AGM lower heat tolerance
+        summer_energy_priority: "Solar First"
+        summer_battery_type: "AGM"
+
+        enable_temp_override: true
+        extreme_cold_threshold: 0
+        extreme_heat_threshold: 40  # More conservative for AGM
+
+        notification_service: notify.mobile_app
+        notify_on_mode_change: true
+        notify_on_temp_override: true
+        check_frequency_hours: 6
+
+# ============================================================================
+# EXAMPLE 7: Weather-Based Priority - Full Featured
+# ============================================================================
+# Comprehensive weather-based automation with all features
+
+automation:
+  - alias: "SRNE Weather Priority - Advanced"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/weather_based_priority.yaml
+      input:
+        inverter_device: YOUR_SRNE_DEVICE_ID
+        energy_priority_entity: select.srne_energy_priority
+
+        # Weather Sensors (OpenWeatherMap example)
+        cloud_coverage_sensor: sensor.openweathermap_cloud_coverage
+        weather_condition_sensor: weather.home
+        solar_radiation_sensor: sensor.solar_radiation
+        uv_index_sensor: sensor.openweathermap_uv_index
+        visibility_sensor: sensor.openweathermap_visibility
+        precipitation_sensor: sensor.openweathermap_rain_today
+        solar_forecast_sensor: sensor.solcast_forecast_today
+
+        # Priority Mappings (customize for your needs)
+        clear_sky_priority: "Solar First"
+        partly_cloudy_priority: "SBU (Solar-Battery-Utility)"
+        cloudy_priority: "Battery First"
+        overcast_priority: "Utility First"
+        rainy_priority: "Utility First"
+        night_priority: "Utility First"
+
+        # Cloud Coverage Thresholds (adjust for your climate)
+        clear_sky_threshold: 20  # < 20% clouds = clear
+        partly_cloudy_threshold: 50  # 20-50% = partly cloudy
+        cloudy_threshold: 80  # 50-80% = cloudy, >80% = overcast
+
+        # Stability Settings (prevent rapid switching)
+        confidence_threshold: 70  # Require 70% confidence to change
+        minimum_change_interval: 30  # Min 30 minutes between changes
+        hysteresis_margin: 10  # Need 10% cloud change to trigger
+
+        # Time-Based Logic
+        enable_time_based_logic: true
+        morning_start_time: "06:00:00"
+        peak_solar_start_time: "10:00:00"
+        peak_solar_end_time: "15:00:00"
+        evening_end_time: "19:00:00"
+
+        # Solar Forecast Integration
+        use_solar_forecast: true
+        forecast_low_threshold: 5.0  # Switch to utility if < 5 kWh expected
+
+        # Storm Protection
+        enable_storm_mode: true
+        storm_wind_speed_threshold: 50  # km/h
+
+        # Battery Considerations
+        battery_soc_sensor: sensor.srne_battery_soc
+        low_battery_threshold: 20  # Force charging below 20%
+        high_battery_threshold: 80  # Can use battery above 80%
+
+        # Notifications
+        notification_service: notify.mobile_app_iphone
+        notify_on_priority_change: true
+        notify_on_storm_mode: true
+        include_reasoning: true
+
+        # Execution Settings
+        check_frequency: 15  # Check every 15 minutes
+        enable_at_sunrise: true
+        enable_at_sunset: true
+
+# ============================================================================
+# EXAMPLE 8: Weather-Based Priority - Simple Cloud Coverage Only
+# ============================================================================
+# Basic configuration using only cloud coverage
+
+automation:
+  - alias: "SRNE Weather Priority - Simple"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/weather_based_priority.yaml
+      input:
+        inverter_device: YOUR_SRNE_DEVICE_ID
+        energy_priority_entity: select.srne_energy_priority
+
+        # Only cloud coverage required
+        cloud_coverage_sensor: sensor.openweathermap_cloud_coverage
+        battery_soc_sensor: sensor.srne_battery_soc
+
+        # Simple priority mapping
+        clear_sky_priority: "Solar First"
+        partly_cloudy_priority: "Solar First"
+        cloudy_priority: "Battery First"
+        overcast_priority: "Utility First"
+        rainy_priority: "Utility First"
+        night_priority: "Utility First"
+
+        # Conservative thresholds
+        clear_sky_threshold: 30
+        partly_cloudy_threshold: 60
+        cloudy_threshold: 85
+
+        confidence_threshold: 70
+        minimum_change_interval: 30
+
+        enable_time_based_logic: true
+        use_solar_forecast: false
+        enable_storm_mode: false
+
+        notification_service: notify.mobile_app
+        notify_on_priority_change: true
+        include_reasoning: false
+
+        check_frequency: 30  # Check every 30 minutes
+
+# ============================================================================
+# EXAMPLE 9: Weather-Based Priority - Time-of-Use Optimization
+# ============================================================================
+# Optimized for locations with TOU (Time-of-Use) electricity rates
+
+automation:
+  - alias: "SRNE Weather Priority - TOU Optimized"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/weather_based_priority.yaml
+      input:
+        inverter_device: YOUR_SRNE_DEVICE_ID
+        energy_priority_entity: select.srne_energy_priority
+
+        cloud_coverage_sensor: sensor.openweathermap_cloud_coverage
+        weather_condition_sensor: weather.home
+        battery_soc_sensor: sensor.srne_battery_soc
+
+        # TOU-optimized priorities
+        # Off-peak (night): charge from grid
+        # Peak (day): use solar/battery
+        clear_sky_priority: "Solar First"  # Max solar during peak
+        partly_cloudy_priority: "Battery First"  # Use stored energy during peak
+        cloudy_priority: "Battery First"  # Preserve battery for peak
+        overcast_priority: "SBU (Solar-Battery-Utility)"  # Balanced
+        rainy_priority: "Battery First"  # Use battery during peak
+        night_priority: "Utility First"  # Charge during off-peak
+
+        clear_sky_threshold: 20
+        partly_cloudy_threshold: 50
+        cloudy_threshold: 80
+
+        confidence_threshold: 75
+        minimum_change_interval: 45  # Less switching for TOU
+
+        # Adjusted for TOU periods
+        enable_time_based_logic: true
+        morning_start_time: "07:00:00"  # Off-peak ends
+        peak_solar_start_time: "12:00:00"  # Peak rate begins
+        peak_solar_end_time: "19:00:00"  # Peak rate ends
+        evening_end_time: "21:00:00"  # Return to off-peak
+
+        battery_soc_sensor: sensor.srne_battery_soc
+        low_battery_threshold: 30  # Higher threshold for TOU
+        high_battery_threshold: 90  # Ensure full charge for peak
+
+        notification_service: notify.mobile_app
+        notify_on_priority_change: true
+        include_reasoning: true
+        check_frequency: 20
+
+# ============================================================================
+# EXAMPLE 10: Combined Setup - All Three Blueprints Working Together
+# ============================================================================
+# Complete automation suite for advanced users
+
+automation:
+  # Blueprint 1: Daily Performance Dashboard
+  - alias: "SRNE Performance Dashboard"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/daily_performance_dashboard.yaml
+      input:
+        inverter_device: YOUR_SRNE_DEVICE_ID
+        pv_energy_today_sensor: sensor.srne_pv_energy_today
+        battery_charge_today_sensor: sensor.srne_battery_charge_today
+        battery_discharge_today_sensor: sensor.srne_battery_discharge_today
+        grid_import_today_sensor: sensor.grid_import_today
+        battery_soc_sensor: sensor.srne_battery_soc
+        calculation_method: "weighted"
+        notification_style: "detailed"
+        report_time: "23:00:00"
+        include_comparisons: true
+        include_battery_health: true
+        include_cost_analysis: true
+        notification_service: notify.mobile_app
+
+  # Blueprint 2: Seasonal Parameter Adjuster
+  - alias: "SRNE Seasonal Adjustment"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/seasonal_parameter_adjuster.yaml
+      input:
+        inverter_device: YOUR_SRNE_DEVICE_ID
+        battery_temperature_sensor: sensor.srne_battery_temperature
+        winter_start_month: 11
+        winter_start_day: 1
+        winter_end_month: 4
+        winter_end_day: 30
+        winter_battery_charge_voltage: 55.0
+        summer_battery_charge_voltage: 56.0
+        enable_temp_override: true
+        notification_service: notify.mobile_app
+        check_frequency_hours: 6
+
+  # Blueprint 3: Weather-Based Priority
+  - alias: "SRNE Weather Priority"
+    use_blueprint:
+      path: srne_inverter/3_monitoring/weather_based_priority.yaml
+      input:
+        inverter_device: YOUR_SRNE_DEVICE_ID
+        energy_priority_entity: select.srne_energy_priority
+        cloud_coverage_sensor: sensor.openweathermap_cloud_coverage
+        battery_soc_sensor: sensor.srne_battery_soc
+        clear_sky_priority: "Solar First"
+        cloudy_priority: "Battery First"
+        overcast_priority: "Utility First"
+        confidence_threshold: 70
+        notification_service: notify.mobile_app
+        check_frequency: 15
+
+# ============================================================================
+# TEMPLATE SENSORS FOR HISTORICAL COMPARISONS
+# ============================================================================
+# Add these to your configuration.yaml or templates.yaml
+
+template:
+  - sensor:
+      # Yesterday's PV production
+      - name: "PV Energy Yesterday"
+        unique_id: pv_energy_yesterday
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total
+        state: >
+          {% set yesterday = now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1) %}
+          {{ state_attr('sensor.srne_pv_energy_today', 'last_reset') }}
+        # Note: You may need to use the history integration for accurate values
+
+      # 7-day average PV production
+      - name: "PV Energy 7-Day Average"
+        unique_id: pv_energy_7day_avg
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state: >
+          {% set ns = namespace(total=0, count=0) %}
+          {% for i in range(1, 8) %}
+            {% set day = (now() - timedelta(days=i)).strftime('%Y-%m-%d') %}
+            {% set value = states('sensor.srne_pv_energy_today') | float(0) %}
+            {% if value > 0 %}
+              {% set ns.total = ns.total + value %}
+              {% set ns.count = ns.count + 1 %}
+            {% endif %}
+          {% endfor %}
+          {{ (ns.total / ns.count) | round(2) if ns.count > 0 else 0 }}
+
+# ============================================================================
+# HELPER ENTITIES
+# ============================================================================
+# Create these in Configuration > Helpers or configuration.yaml
+
+input_boolean:
+  # Manual override for seasonal adjuster
+  srne_manual_override:
+    name: "Manual Inverter Control"
+    icon: mdi:lock
+
+input_number:
+  # Dynamic electricity rates
+  electricity_buy_rate:
+    name: "Electricity Buy Rate"
+    min: 0
+    max: 1
+    step: 0.01
+    unit_of_measurement: "$/kWh"
+    mode: box
+    icon: mdi:currency-usd
+
+  electricity_sell_rate:
+    name: "Electricity Sell Rate"
+    min: 0
+    max: 1
+    step: 0.01
+    unit_of_measurement: "$/kWh"
+    mode: box
+    icon: mdi:currency-usd

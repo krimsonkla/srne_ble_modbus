@@ -1,0 +1,19 @@
+force_refresh:
+  name: Force Refresh
+  description: Immediately trigger a data update from the inverter
+
+reset_statistics:
+  name: Reset Statistics
+  description: Reset diagnostic counters (failed reads, success rate). Does NOT reset inverter statistics.
+
+restart_inverter:
+  name: Restart Inverter
+  description: Send restart command to the inverter (requires confirmation)
+  fields:
+    confirm:
+      name: Confirm
+      description: Must be set to true to confirm restart
+      required: true
+      example: true
+      selector:
+        boolean:

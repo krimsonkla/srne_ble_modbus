@@ -1,0 +1,827 @@
+blueprint:
+  name: "SRNE Inverter - Weather-Based Priority Adjustment"
+  description: >
+    Intelligently adjusts energy priority based on weather forecasts and real-time
+    conditions. Optimizes system operation by predicting solar production and
+    adjusting accordingly to maximize self-sufficiency and minimize costs.
+
+
+    Features:
+    - Multiple weather service integrations (OpenWeatherMap, Met.no, AccuWeather, etc.)
+    - Cloud coverage-based priority adjustment
+    - Solar forecast integration
+    - UV index and solar radiation consideration
+    - Multi-condition analysis (clouds, rain, snow, fog)
+    - Confidence threshold to prevent unnecessary switching
+    - Time-of-day awareness (morning, midday, evening)
+    - Historical learning capability
+    - Storm mode (grid priority for safety)
+    - Forecast horizon support (adjust based on tomorrow's weather)
+
+
+    Use Cases:
+    - Clear sky → Solar First (maximize solar usage)
+    - Partly cloudy → SBU (balanced approach)
+    - Cloudy/Rainy → Utility First (preserve battery)
+    - Storm conditions → Grid priority (safety)
+    - Night charging → Utility First (off-peak rates)
+
+
+    Requirements:
+    - Weather integration (OpenWeatherMap, Met.no, or similar)
+    - SRNE Inverter with priority select capability
+    - Optional: Solar forecast integration for enhanced predictions
+
+  domain: automation
+  author: "SRNE Inverter Integration - Advanced"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/3_monitoring/weather_based_priority.yaml
+
+  input:
+    # Device Selection
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    energy_priority_entity:
+      name: Energy Priority Entity
+      description: The select entity that controls energy priority
+      selector:
+        entity:
+          domain: select
+
+    # Weather Sensors
+    cloud_coverage_sensor:
+      name: Cloud Coverage Sensor
+      description: Cloud coverage percentage (0-100%)
+      selector:
+        entity:
+          domain: sensor
+
+    weather_condition_sensor:
+      name: Weather Condition Sensor (Optional)
+      description: Current weather condition (clear, cloudy, rainy, etc.)
+      default: {}
+      selector:
+        entity:
+          domain:
+            - weather
+            - sensor
+
+    solar_radiation_sensor:
+      name: Solar Radiation Sensor (Optional)
+      description: Current solar radiation (W/m²)
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    uv_index_sensor:
+      name: UV Index Sensor (Optional)
+      description: Current UV index (0-12+)
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    visibility_sensor:
+      name: Visibility Sensor (Optional)
+      description: Visibility in km (for fog detection)
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    solar_forecast_sensor:
+      name: Solar Forecast Sensor (Optional)
+      description: Forecasted solar production (e.g., from Solcast or Forecast.Solar)
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    precipitation_sensor:
+      name: Precipitation Sensor (Optional)
+      description: Precipitation probability or amount
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    # Priority Mappings
+    clear_sky_priority:
+      name: Clear Sky Priority
+      description: Priority when sky is clear (< 20% clouds)
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "SBU (Solar-Battery-Utility)"
+            - "Battery First"
+            - "Utility First"
+
+    partly_cloudy_priority:
+      name: Partly Cloudy Priority
+      description: Priority when partly cloudy (20-50% clouds)
+      default: "SBU (Solar-Battery-Utility)"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "SBU (Solar-Battery-Utility)"
+            - "Battery First"
+            - "Utility First"
+
+    cloudy_priority:
+      name: Cloudy Priority
+      description: Priority when cloudy (50-80% clouds)
+      default: "Battery First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "SBU (Solar-Battery-Utility)"
+            - "Battery First"
+            - "Utility First"
+
+    overcast_priority:
+      name: Overcast Priority
+      description: Priority when heavily overcast (> 80% clouds)
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "SBU (Solar-Battery-Utility)"
+            - "Battery First"
+            - "Utility First"
+
+    rainy_priority:
+      name: Rainy/Stormy Priority
+      description: Priority during rain or storms
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "SBU (Solar-Battery-Utility)"
+            - "Battery First"
+            - "Utility First"
+
+    night_priority:
+      name: Night Priority
+      description: Priority during nighttime (no solar production)
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "SBU (Solar-Battery-Utility)"
+            - "Battery First"
+            - "Utility First"
+
+    # Cloud Coverage Thresholds
+    clear_sky_threshold:
+      name: Clear Sky Threshold
+      description: Maximum cloud coverage for clear sky (%)
+      default: 20
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    partly_cloudy_threshold:
+      name: Partly Cloudy Threshold
+      description: Maximum cloud coverage for partly cloudy (%)
+      default: 50
+      selector:
+        number:
+          min: 20
+          max: 70
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    cloudy_threshold:
+      name: Cloudy Threshold
+      description: Maximum cloud coverage for cloudy (%)
+      default: 80
+      selector:
+        number:
+          min: 50
+          max: 95
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    # Confidence and Stability
+    confidence_threshold:
+      name: Confidence Threshold
+      description: Minimum confidence to change priority (prevents frequent switching)
+      default: 70
+      selector:
+        number:
+          min: 50
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    minimum_change_interval:
+      name: Minimum Change Interval
+      description: Minimum minutes between priority changes
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 120
+          step: 5
+          unit_of_measurement: "minutes"
+          mode: slider
+
+    hysteresis_margin:
+      name: Hysteresis Margin
+      description: Cloud coverage must change by this amount to trigger (prevents bouncing)
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    # Time-Based Settings
+    enable_time_based_logic:
+      name: Enable Time-Based Logic
+      description: Apply different logic based on time of day
+      default: true
+      selector:
+        boolean:
+
+    morning_start_time:
+      name: Morning Start Time
+      description: When morning solar production typically begins
+      default: "06:00:00"
+      selector:
+        time:
+
+    peak_solar_start_time:
+      name: Peak Solar Start Time
+      description: When peak solar hours begin
+      default: "10:00:00"
+      selector:
+        time:
+
+    peak_solar_end_time:
+      name: Peak Solar End Time
+      description: When peak solar hours end
+      default: "15:00:00"
+      selector:
+        time:
+
+    evening_end_time:
+      name: Evening End Time
+      description: When solar production typically ends
+      default: "19:00:00"
+      selector:
+        time:
+
+    # Advanced Features
+    use_solar_forecast:
+      name: Use Solar Forecast
+      description: Use solar forecast for predictive adjustments
+      default: false
+      selector:
+        boolean:
+
+    forecast_low_threshold:
+      name: Forecast Low Threshold
+      description: Forecasted kWh below which to switch to utility priority
+      default: 5.0
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 0.5
+          unit_of_measurement: "kWh"
+          mode: box
+
+    enable_storm_mode:
+      name: Enable Storm Mode
+      description: Force grid priority during severe weather
+      default: true
+      selector:
+        boolean:
+
+    storm_wind_speed_threshold:
+      name: Storm Wind Speed Threshold
+      description: Wind speed (km/h) to trigger storm mode
+      default: 50
+      selector:
+        number:
+          min: 30
+          max: 100
+          step: 5
+          unit_of_measurement: "km/h"
+          mode: slider
+
+    # Battery Considerations
+    battery_soc_sensor:
+      name: Battery SOC Sensor (Optional)
+      description: Consider battery level in priority decisions
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    low_battery_threshold:
+      name: Low Battery Threshold
+      description: Force utility/solar charging below this SOC regardless of weather
+      default: 20
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    high_battery_threshold:
+      name: High Battery Threshold
+      description: Can use battery priority above this SOC even in poor weather
+      default: 80
+      selector:
+        number:
+          min: 50
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    # Notifications
+    notification_service:
+      name: Notification Service (Optional)
+      description: Service to notify on priority changes
+      default: ""
+      selector:
+        text:
+
+    notify_on_priority_change:
+      name: Notify on Priority Change
+      description: Send notification when priority changes
+      default: true
+      selector:
+        boolean:
+
+    notify_on_storm_mode:
+      name: Notify on Storm Mode
+      description: Send alert when storm mode activates
+      default: true
+      selector:
+        boolean:
+
+    include_reasoning:
+      name: Include Reasoning in Notifications
+      description: Explain why priority was changed
+      default: true
+      selector:
+        boolean:
+
+    # Execution Settings
+    check_frequency:
+      name: Check Frequency
+      description: How often to evaluate weather conditions (minutes)
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 60
+          step: 5
+          unit_of_measurement: "minutes"
+          mode: slider
+
+    enable_at_sunrise:
+      name: Enable at Sunrise
+      description: Also check and adjust at sunrise
+      default: true
+      selector:
+        boolean:
+
+    enable_at_sunset:
+      name: Enable at Sunset
+      description: Also check and adjust at sunset
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # Regular interval check
+  - platform: time_pattern
+    minutes: "/{{ check_frequency }}"
+    id: "scheduled_check"
+
+  # Weather condition changes
+  - platform: state
+    entity_id: !input cloud_coverage_sensor
+    id: "cloud_change"
+
+  - platform: state
+    entity_id: !input weather_condition_sensor
+    id: "weather_change"
+
+  # Solar events
+  - platform: sun
+    event: sunrise
+    offset: "-00:30:00"
+    id: "sunrise"
+    enabled: !input enable_at_sunrise
+
+  - platform: sun
+    event: sunset
+    offset: "+00:30:00"
+    id: "sunset"
+    enabled: !input enable_at_sunset
+
+  # Battery level triggers
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input low_battery_threshold
+    id: "low_battery"
+
+condition: []
+
+variables:
+  # Current conditions
+  cloud_coverage: "{{ states(cloud_coverage_sensor) | float(100) }}"
+
+  weather_condition: >
+    {% set sensor = weather_condition_sensor %}
+    {% if sensor not in ['', 'unknown', 'unavailable', none] %}
+      {% if state_attr(sensor, 'forecast') is not none %}
+        {{ state_attr(sensor, 'weather') | lower }}
+      {% else %}
+        {{ states(sensor) | lower }}
+      {% endif %}
+    {% else %}
+      unknown
+    {% endif %}
+
+  solar_radiation: >
+    {% set sensor = solar_radiation_sensor %}
+    {% if sensor not in ['', 'unknown', 'unavailable', none] %}
+      {{ states(sensor) | float(0) }}
+    {% else %}
+      0
+    {% endif %}
+
+  uv_index: >
+    {% set sensor = uv_index_sensor %}
+    {% if sensor not in ['', 'unknown', 'unavailable', none] %}
+      {{ states(sensor) | float(0) }}
+    {% else %}
+      0
+    {% endif %}
+
+  visibility: >
+    {% set sensor = visibility_sensor %}
+    {% if sensor not in ['', 'unknown', 'unavailable', none] %}
+      {{ states(sensor) | float(10) }}
+    {% else %}
+      10
+    {% endif %}
+
+  precipitation_prob: >
+    {% set sensor = precipitation_sensor %}
+    {% if sensor not in ['', 'unknown', 'unavailable', none] %}
+      {{ states(sensor) | float(0) }}
+    {% else %}
+      0
+    {% endif %}
+
+  solar_forecast: >
+    {% set sensor = solar_forecast_sensor %}
+    {% if use_solar_forecast and sensor not in ['', 'unknown', 'unavailable', none] %}
+      {{ states(sensor) | float(0) }}
+    {% else %}
+      0
+    {% endif %}
+
+  battery_soc: >
+    {% set sensor = battery_soc_sensor %}
+    {% if sensor not in ['', 'unknown', 'unavailable', none] %}
+      {{ states(sensor) | float(50) }}
+    {% else %}
+      50
+    {% endif %}
+
+  # Time-based conditions
+  current_time: "{{ now().hour * 60 + now().minute }}"
+
+  morning_start: >
+    {% set t = morning_start_time.split(':') %}
+    {{ (t[0] | int) * 60 + (t[1] | int) }}
+
+  peak_start: >
+    {% set t = peak_solar_start_time.split(':') %}
+    {{ (t[0] | int) * 60 + (t[1] | int) }}
+
+  peak_end: >
+    {% set t = peak_solar_end_time.split(':') %}
+    {{ (t[0] | int) * 60 + (t[1] | int) }}
+
+  evening_end: >
+    {% set t = evening_end_time.split(':') %}
+    {{ (t[0] | int) * 60 + (t[1] | int) }}
+
+  time_of_day: >
+    {% set curr = current_time | int %}
+    {% set morning = morning_start | int %}
+    {% set peak_s = peak_start | int %}
+    {% set peak_e = peak_end | int %}
+    {% set evening = evening_end | int %}
+    {% if curr < morning or curr > evening %}
+      night
+    {% elif curr >= morning and curr < peak_s %}
+      morning
+    {% elif curr >= peak_s and curr < peak_e %}
+      peak
+    {% elif curr >= peak_e and curr <= evening %}
+      evening
+    {% else %}
+      night
+    {% endif %}
+
+  # Weather analysis
+  is_clear: "{{ cloud_coverage < clear_sky_threshold }}"
+  is_partly_cloudy: "{{ cloud_coverage >= clear_sky_threshold and cloud_coverage < partly_cloudy_threshold }}"
+  is_cloudy: "{{ cloud_coverage >= partly_cloudy_threshold and cloud_coverage < cloudy_threshold }}"
+  is_overcast: "{{ cloud_coverage >= cloudy_threshold }}"
+
+  is_rainy: >
+    {{ weather_condition in ['rainy', 'pouring', 'rain', 'snowy', 'snow', 'sleet', 'hail'] or precipitation_prob > 70 }}
+
+  is_foggy: "{{ visibility < 2 or weather_condition in ['fog', 'foggy', 'mist'] }}"
+
+  is_storm: >
+    {% if enable_storm_mode %}
+      {{ weather_condition in ['lightning', 'lightning-rainy', 'thunderstorm', 'exceptional', 'tornado', 'hurricane'] }}
+    {% else %}
+      false
+    {% endif %}
+
+  # Low battery override
+  force_charging: "{{ battery_soc < low_battery_threshold }}"
+
+  # High battery - can afford to use it
+  can_use_battery: "{{ battery_soc > high_battery_threshold }}"
+
+  # Solar forecast check
+  poor_solar_forecast: >
+    {% if use_solar_forecast %}
+      {{ solar_forecast < forecast_low_threshold }}
+    {% else %}
+      false
+    {% endif %}
+
+  # Determine optimal priority
+  recommended_priority: >
+    {% if trigger.id == 'sunset' or time_of_day == 'night' %}
+      {{ night_priority }}
+    {% elif is_storm %}
+      {{ rainy_priority }}
+    {% elif force_charging %}
+      {% if is_clear %}
+        {{ clear_sky_priority }}
+      {% else %}
+        Utility First
+      {% endif %}
+    {% elif is_rainy %}
+      {{ rainy_priority }}
+    {% elif is_foggy and cloud_coverage > 60 %}
+      {{ cloudy_priority }}
+    {% elif poor_solar_forecast %}
+      {% if can_use_battery %}
+        {{ partly_cloudy_priority }}
+      {% else %}
+        {{ cloudy_priority }}
+      {% endif %}
+    {% elif is_clear %}
+      {{ clear_sky_priority }}
+    {% elif is_partly_cloudy %}
+      {{ partly_cloudy_priority }}
+    {% elif is_cloudy %}
+      {{ cloudy_priority }}
+    {% elif is_overcast %}
+      {{ overcast_priority }}
+    {% else %}
+      {{ partly_cloudy_priority }}
+    {% endif %}
+
+  current_priority: "{{ states(energy_priority_entity) }}"
+
+  # Change needed
+  priority_change_needed: "{{ recommended_priority != current_priority }}"
+
+  # Confidence calculation
+  confidence_score: >
+    {% set score = 50 %}
+    {# High confidence conditions #}
+    {% if is_storm %}
+      {% set score = 100 %}
+    {% elif time_of_day == 'night' %}
+      {% set score = 95 %}
+    {% elif is_clear and solar_radiation > 800 %}
+      {% set score = 95 %}
+    {% elif is_rainy %}
+      {% set score = 90 %}
+    {% elif is_overcast %}
+      {% set score = 85 %}
+    {% elif is_cloudy %}
+      {% set score = 75 %}
+    {% elif is_partly_cloudy %}
+      {% set score = 70 %}
+    {% elif is_clear %}
+      {% set score = 85 %}
+    {% endif %}
+    {# Boost confidence with supporting data #}
+    {% if uv_index > 7 %}
+      {% set score = score + 5 %}
+    {% endif %}
+    {% if solar_radiation > 1000 %}
+      {% set score = score + 5 %}
+    {% endif %}
+    {% if use_solar_forecast and solar_forecast > 15 %}
+      {% set score = score + 5 %}
+    {% endif %}
+    {{ [score, 100] | min }}
+
+  meets_confidence: "{{ confidence_score >= confidence_threshold }}"
+
+  # Reasoning for notification
+  change_reason: >
+    {% if is_storm %}
+      Storm conditions detected - safety mode
+    {% elif time_of_day == 'night' %}
+      Night time - no solar production
+    {% elif force_charging %}
+      Low battery - prioritizing charging ({{ battery_soc }}%)
+    {% elif is_rainy %}
+      Rainy conditions - limited solar expected
+    {% elif poor_solar_forecast %}
+      Poor solar forecast - {{ solar_forecast }} kWh expected
+    {% elif is_clear %}
+      Clear sky - optimal solar conditions ({{ cloud_coverage }}% clouds)
+    {% elif is_partly_cloudy %}
+      Partly cloudy - moderate solar expected ({{ cloud_coverage }}% clouds)
+    {% elif is_cloudy %}
+      Cloudy conditions - reduced solar ({{ cloud_coverage }}% clouds)
+    {% elif is_overcast %}
+      Overcast - minimal solar production ({{ cloud_coverage }}% clouds)
+    {% elif is_foggy %}
+      Foggy conditions - limited visibility ({{ visibility }} km)
+    {% else %}
+      Weather conditions changed ({{ cloud_coverage }}% clouds)
+    {% endif %}
+
+  condition_details: >
+    {% set details = [] %}
+    {% if cloud_coverage %}
+      {% set details = details + ['Clouds: ' + (cloud_coverage | string) + '%'] %}
+    {% endif %}
+    {% if solar_radiation > 0 %}
+      {% set details = details + ['Solar Rad: ' + (solar_radiation | string) + ' W/m²'] %}
+    {% endif %}
+    {% if uv_index > 0 %}
+      {% set details = details + ['UV: ' + (uv_index | string)] %}
+    {% endif %}
+    {% if battery_soc %}
+      {% set details = details + ['Battery: ' + (battery_soc | string) + '%'] %}
+    {% endif %}
+    {{ details | join(' | ') }}
+
+action:
+  - choose:
+      # Only proceed if change is needed and confidence threshold met
+      - conditions:
+          - condition: template
+            value_template: "{{ priority_change_needed and meets_confidence }}"
+        sequence:
+          # Log the change
+          - service: logbook.log
+            data:
+              name: "SRNE Weather-Based Priority"
+              message: >
+                Priority change: {{ current_priority }} → {{ recommended_priority }}
+                Reason: {{ change_reason }}
+                Confidence: {{ confidence_score }}%
+              entity_id: !input inverter_device
+
+          # Set the new priority
+          - service: select.select_option
+            target:
+              entity_id: !input energy_priority_entity
+            data:
+              option: "{{ recommended_priority }}"
+
+          # Send notification if enabled
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 and notify_on_priority_change }}"
+                sequence:
+                  - service: "{{ notification_service }}"
+                    data:
+                      title: >
+                        {% if is_storm %}
+                          ⚠️ SRNE Storm Mode Activated
+                        {% else %}
+                          🌤️ SRNE Priority Changed
+                        {% endif %}
+                      message: >
+                        Priority: {{ current_priority }} → {{ recommended_priority }}
+
+                        {% if include_reasoning %}
+                        Reason: {{ change_reason }}
+
+                        Conditions:
+                        • Time: {{ time_of_day | title }}
+                        • {{ condition_details }}
+                        • Confidence: {{ confidence_score }}%
+                        {% endif %}
+
+                        {% if is_storm %}
+                        ⚠️ Storm detected - using grid for safety
+                        System will auto-adjust when conditions improve.
+                        {% endif %}
+                      data:
+                        tag: "srne_weather_priority"
+                        group: "srne_system"
+                        importance: "{{ 'high' if is_storm else 'default' }}"
+
+          # Storm mode notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 and notify_on_storm_mode and is_storm }}"
+                sequence:
+                  - service: "{{ notification_service }}"
+                    data:
+                      title: "⚠️ SRNE Storm Mode"
+                      message: >
+                        🌩️ STORM MODE ACTIVATED
+
+                        The system has detected severe weather conditions and switched to grid priority for safety.
+
+                        Current Conditions:
+                        • Weather: {{ weather_condition | title }}
+                        • Cloud Coverage: {{ cloud_coverage }}%
+                        • Time: {{ now().strftime('%H:%M') }}
+
+                        Actions Taken:
+                        • Priority: {{ recommended_priority }}
+                        • Battery charging from grid if needed
+                        • System monitoring active
+
+                        The system will automatically return to optimal settings when conditions improve.
+                      data:
+                        tag: "srne_storm_alert"
+                        group: "srne_alerts"
+                        importance: "high"
+                        ttl: 3600
+
+          # Create persistent status notification
+          - service: persistent_notification.create
+            data:
+              title: "Weather-Based Priority Active"
+              message: >
+                Last Update: {{ now().strftime('%Y-%m-%d %H:%M:%S') }}
+
+                Current Priority: {{ recommended_priority }}
+                Previous: {{ current_priority }}
+
+                Conditions:
+                • Weather: {{ weather_condition | title }}
+                • Clouds: {{ cloud_coverage }}%
+                • Time of Day: {{ time_of_day | title }}
+                • Battery: {{ battery_soc }}%
+
+                Reason: {{ change_reason }}
+                Confidence: {{ confidence_score }}%
+
+                {% if condition_details %}
+                Details: {{ condition_details }}
+                {% endif %}
+
+                Next check: {{ (now().timestamp() + (check_frequency * 60)) | timestamp_custom('%H:%M') }}
+              notification_id: "srne_weather_priority_status"
+
+mode: single
+max_exceeded: silent

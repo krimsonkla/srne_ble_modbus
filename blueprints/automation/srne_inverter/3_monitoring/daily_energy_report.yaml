@@ -1,0 +1,218 @@
+blueprint:
+  name: "SRNE Inverter - Daily Energy Report"
+  description: >
+    Generates a comprehensive daily energy report including production, consumption,
+    self-sufficiency percentage, and battery health metrics.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/daily_energy_report.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    pv_energy_today_sensor:
+      name: PV Energy Today Sensor
+      description: Solar energy produced today
+      selector:
+        entity:
+          domain: sensor
+
+    battery_charge_today_sensor:
+      name: Battery Charge Today Sensor
+      description: Energy charged to battery today
+      selector:
+        entity:
+          domain: sensor
+
+    battery_discharge_today_sensor:
+      name: Battery Discharge Today Sensor
+      description: Energy discharged from battery today
+      selector:
+        entity:
+          domain: sensor
+
+    grid_import_today_sensor:
+      name: Grid Import Today Sensor (Optional)
+      description: Energy imported from grid today
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    load_consumption_today_sensor:
+      name: Load Consumption Today Sensor (Optional)
+      description: Total load consumption today
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Current battery state of charge
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    battery_cycles_sensor:
+      name: Battery Cycles Sensor (Optional)
+      description: Battery cycle count
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    report_time:
+      name: Report Time
+      description: When to send the daily report
+      default: "23:00:00"
+      selector:
+        time:
+
+    notification_service:
+      name: Notification Service
+      description: Service to send the report to
+      selector:
+        text:
+
+    include_battery_health:
+      name: Include Battery Health
+      description: Include battery health metrics in report
+      default: true
+      selector:
+        boolean:
+
+    create_persistent_notification:
+      name: Create Persistent Notification
+      description: Also create a persistent notification in Home Assistant UI
+      default: true
+      selector:
+        boolean:
+
+    report_format:
+      name: Report Format
+      description: Choose between detailed or summary format
+      default: "detailed"
+      selector:
+        select:
+          options:
+            - "detailed"
+            - "summary"
+
+trigger:
+  - platform: time
+    at: !input report_time
+
+condition: []
+
+action:
+  - variables:
+      pv_energy: "{{ states(pv_energy_today_sensor) | float(0) }}"
+      battery_charge: "{{ states(battery_charge_today_sensor) | float(0) }}"
+      battery_discharge: "{{ states(battery_discharge_today_sensor) | float(0) }}"
+      battery_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      grid_import: >
+        {% if grid_import_today_sensor is defined and grid_import_today_sensor != none %}
+          {{ states(grid_import_today_sensor) | float(0) }}
+        {% else %}
+          0
+        {% endif %}
+      load_consumption: >
+        {% if load_consumption_today_sensor is defined and load_consumption_today_sensor != none %}
+          {{ states(load_consumption_today_sensor) | float(0) }}
+        {% else %}
+          {{ pv_energy + battery_discharge + grid_import }}
+        {% endif %}
+      self_sufficiency: >
+        {% set total = load_consumption | float(0) %}
+        {% if total > 0 %}
+          {{ (((pv_energy + battery_discharge) / total) * 100) | round(1) }}
+        {% else %}
+          0
+        {% endif %}
+      battery_cycles: >
+        {% if battery_cycles_sensor is defined and battery_cycles_sensor != none %}
+          {{ states(battery_cycles_sensor) | int(0) }}
+        {% else %}
+          N/A
+        {% endif %}
+      battery_efficiency: >
+        {% if battery_charge > 0 %}
+          {{ ((battery_discharge / battery_charge) * 100) | round(1) }}
+        {% else %}
+          N/A
+        {% endif %}
+      format: !input report_format
+
+  - choose:
+      # Detailed report format
+      - conditions:
+          - condition: template
+            value_template: "{{ format == 'detailed' }}"
+        sequence:
+          - variables:
+              report_message: >
+                📊 Daily Energy Report - {{ now().strftime('%Y-%m-%d') }}
+
+                ☀️ Solar Production:
+                └─ PV Energy: {{ pv_energy }} kWh
+
+                🔋 Battery:
+                └─ Charged: {{ battery_charge }} kWh
+                └─ Discharged: {{ battery_discharge }} kWh
+                └─ Current SOC: {{ battery_soc }}%
+                {% if include_battery_health %}
+                └─ Efficiency: {{ battery_efficiency }}%
+                └─ Cycles: {{ battery_cycles }}
+                {% endif %}
+
+                ⚡ Consumption:
+                └─ Total Load: {{ load_consumption }} kWh
+                └─ From Grid: {{ grid_import }} kWh
+                └─ From Solar/Battery: {{ (pv_energy + battery_discharge) | round(2) }} kWh
+
+                📈 Self-Sufficiency: {{ self_sufficiency }}%
+
+                💰 Grid Independence: {{ (100 - (grid_import / load_consumption * 100 if load_consumption > 0 else 0)) | round(1) }}%
+
+      # Summary report format
+      - conditions:
+          - condition: template
+            value_template: "{{ format == 'summary' }}"
+        sequence:
+          - variables:
+              report_message: >
+                📊 Daily Report {{ now().strftime('%m/%d') }}
+
+                ☀️ Solar: {{ pv_energy }} kWh
+                🔋 Battery: {{ battery_soc }}% (↑{{ battery_charge }} ↓{{ battery_discharge }} kWh)
+                ⚡ Load: {{ load_consumption }} kWh
+                📈 Self-Sufficiency: {{ self_sufficiency }}%
+
+  # Send notification
+  - service: !input notification_service
+    data:
+      title: "SRNE Energy Report"
+      message: "{{ report_message }}"
+      data:
+        tag: "srne_daily_report"
+
+  # Optional persistent notification
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ create_persistent_notification }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "Daily Energy Report - {{ now().strftime('%Y-%m-%d') }}"
+              message: "{{ report_message }}"
+              notification_id: "srne_daily_report"
+
+mode: single

@@ -1,0 +1,297 @@
+blueprint:
+  name: "SRNE Inverter - Dynamic Current Limiter"
+  description: >
+    Dynamically adjusts battery charge current based on solar surplus after subtracting load power.
+    Optimizes charging rate to match available solar energy, preventing grid draw while maximizing
+    solar utilization. Updates every 5 minutes or when power changes exceed 500W threshold.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/2_optimization/dynamic_current_limiter.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    pv_power_sensor:
+      name: PV Power Sensor
+      description: Solar panel power production sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    load_power_sensor:
+      name: Load Power Sensor
+      description: Current load power consumption sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    charge_current_number:
+      name: Charge Current Control
+      description: Number entity to set battery charge current
+      selector:
+        entity:
+          domain: number
+
+    battery_voltage_sensor:
+      name: Battery Voltage Sensor
+      description: Battery voltage sensor for power calculations
+      selector:
+        entity:
+          domain: sensor
+          device_class: voltage
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    min_surplus_threshold:
+      name: Minimum Surplus Threshold
+      description: Minimum solar surplus before enabling charging (watts)
+      default: 200
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 50
+          unit_of_measurement: "W"
+
+    max_charge_current:
+      name: Maximum Charge Current
+      description: Maximum allowable charge current (amps)
+      default: 120
+      selector:
+        number:
+          min: 10
+          max: 200
+          step: 5
+          unit_of_measurement: "A"
+
+    min_charge_current:
+      name: Minimum Charge Current
+      description: Minimum charge current when solar is available (amps)
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 5
+          unit_of_measurement: "A"
+
+    battery_full_threshold:
+      name: Battery Full Threshold
+      description: Stop increasing current above this SOC (%)
+      default: 95
+      selector:
+        number:
+          min: 80
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+
+    power_change_threshold:
+      name: Power Change Threshold
+      description: Trigger update on power changes exceeding this value (watts)
+      default: 500
+      selector:
+        number:
+          min: 100
+          max: 2000
+          step: 100
+          unit_of_measurement: "W"
+
+    update_interval:
+      name: Update Interval
+      description: Regular update interval regardless of power changes (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: "minutes"
+
+    efficiency_factor:
+      name: Charging Efficiency Factor
+      description: Account for charging losses (0.9 = 90% efficient)
+      default: 0.92
+      selector:
+        number:
+          min: 0.80
+          max: 0.99
+          step: 0.01
+          mode: slider
+
+    enable_notifications:
+      name: Enable Notifications
+      description: Send notifications on significant current adjustments
+      default: false
+      selector:
+        boolean:
+
+    notification_service:
+      name: Notification Service (Optional)
+      description: Notification service for current adjustments
+      default: ""
+      selector:
+        text:
+
+    notification_threshold:
+      name: Notification Current Change Threshold
+      description: Notify when current changes exceed this value (amps)
+      default: 20
+      selector:
+        number:
+          min: 10
+          max: 50
+          step: 5
+          unit_of_measurement: "A"
+
+trigger:
+  # Time-based trigger every N minutes
+  - platform: time_pattern
+    minutes: !input update_interval
+    id: "time_update"
+
+  # PV power change trigger
+  - platform: state
+    entity_id: !input pv_power_sensor
+    id: "pv_change"
+
+  # Load power change trigger
+  - platform: state
+    entity_id: !input load_power_sensor
+    id: "load_change"
+
+condition:
+  # Only run during daylight or when PV is producing
+  - condition: or
+    conditions:
+      - condition: sun
+        after: sunrise
+        before: sunset
+      - condition: numeric_state
+        entity_id: !input pv_power_sensor
+        above: 50
+
+action:
+  - variables:
+      pv_power: "{{ states(pv_power_sensor) | float(0) }}"
+      load_power: "{{ states(load_power_sensor) | float(0) }}"
+      battery_voltage: "{{ states(battery_voltage_sensor) | float(48) }}"
+      battery_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      current_charge_current: "{{ states(charge_current_number) | float(0) }}"
+      efficiency: !input efficiency_factor
+      min_surplus: !input min_surplus_threshold
+      max_current: !input max_charge_current
+      min_current: !input min_charge_current
+      full_threshold: !input battery_full_threshold
+      power_threshold: !input power_change_threshold
+
+  # Calculate power changes if triggered by state change
+  - variables:
+      pv_change: >
+        {% if trigger.id == 'pv_change' and trigger.from_state is not none %}
+          {{ (pv_power - (trigger.from_state.state | float(0))) | abs }}
+        {% else %}
+          0
+        {% endif %}
+      load_change: >
+        {% if trigger.id == 'load_change' and trigger.from_state is not none %}
+          {{ (load_power - (trigger.from_state.state | float(0))) | abs }}
+        {% else %}
+          0
+        {% endif %}
+      significant_change: >
+        {{ trigger.id == 'time_update' or pv_change > power_threshold or load_change > power_threshold }}
+
+  # Only proceed if change is significant
+  - condition: template
+    value_template: "{{ significant_change }}"
+
+  # Calculate surplus power and target current
+  - variables:
+      surplus_power: "{{ pv_power - load_power }}"
+      available_charge_power: "{{ (surplus_power * efficiency) if surplus_power > min_surplus else 0 }}"
+      calculated_current: "{{ (available_charge_power / battery_voltage) | round(1) }}"
+
+      # Apply limits and SOC-based derating
+      soc_factor: >
+        {% if battery_soc > full_threshold %}
+          0.5
+        {% elif battery_soc > (full_threshold - 10) %}
+          0.75
+        {% else %}
+          1.0
+        {% endif %}
+
+      target_current: >
+        {% set calc = (calculated_current * soc_factor) | round(1) %}
+        {% if surplus_power < min_surplus %}
+          0
+        {% elif calc < min_current %}
+          {{ min_current }}
+        {% elif calc > max_current %}
+          {{ max_current }}
+        {% else %}
+          {{ calc }}
+        {% endif %}
+
+      current_change: "{{ (target_current - current_charge_current) | abs }}"
+      should_update: "{{ current_change >= 2 }}"
+
+  # Update charge current if change is significant
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ should_update }}"
+        sequence:
+          - service: number.set_value
+            target:
+              entity_id: !input charge_current_number
+            data:
+              value: "{{ target_current }}"
+
+          # Log the adjustment
+          - service: system_log.write
+            data:
+              message: >
+                Dynamic Current Limiter: Adjusted charge current to {{ target_current }}A
+                (PV: {{ pv_power }}W, Load: {{ load_power }}W, Surplus: {{ surplus_power }}W, SOC: {{ battery_soc }}%)
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.dynamic_limiter
+
+          # Optional notification for large changes
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_notifications }}"
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 }}"
+                  - condition: template
+                    value_template: "{{ current_change >= notification_threshold }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "Charge Current Adjusted"
+                      message: >
+                        Current adjusted from {{ current_charge_current }}A to {{ target_current }}A
+
+                        Solar surplus: {{ surplus_power | round(0) }}W
+                        Battery SOC: {{ battery_soc }}%
+                      data:
+                        tag: "srne_current_limiter"
+                        priority: low
+
+mode: queued
+max: 5

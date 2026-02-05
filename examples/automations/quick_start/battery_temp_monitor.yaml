@@ -1,0 +1,48 @@
+# Battery Temperature Monitor
+# Monitors battery temperature and alerts on high temperature
+#
+# Requirements:
+# - sensor.srne_inverter_battery_temperature (Battery temperature sensor)
+#
+# Usage:
+# 1. Copy this file to your config/automations directory
+# 2. Adjust warning (45°C) and critical (50°C) thresholds
+# 3. Temperature thresholds depend on your battery type
+#
+# Note: Lead-acid batteries typically have different temp limits than lithium
+
+automation:
+  - alias: "SRNE: Battery Temperature Warning"
+    description: "Alert when battery temp exceeds 45°C"
+
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.srne_inverter_battery_temperature
+        above: 45
+
+    condition:
+      - condition: numeric_state
+        entity_id: sensor.srne_inverter_battery_temperature
+        below: 50
+
+    action:
+      - service: notify.notify
+        data:
+          title: "Battery Temperature Warning"
+          message: "Battery temperature is {{ states('sensor.srne_inverter_battery_temperature') }}°C. Monitor closely."
+
+  - alias: "SRNE: Battery Temperature Critical"
+    description: "Critical alert when battery temp exceeds 50°C"
+
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.srne_inverter_battery_temperature
+        above: 50
+
+    action:
+      - service: notify.notify
+        data:
+          title: "CRITICAL: Battery Overheating!"
+          message: "Battery temperature is {{ states('sensor.srne_inverter_battery_temperature') }}°C. Immediate action required!"
+          data:
+            priority: high

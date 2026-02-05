@@ -1,0 +1,181 @@
+blueprint:
+  name: "SRNE Inverter - Solar Optimization"
+  description: >
+    Automatically optimizes energy usage when battery is nearly full and high PV production is detected.
+    Switches to Solar First priority to maximize solar energy usage and minimize grid import.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/solar_optimization.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    pv_power_sensor:
+      name: PV Power Sensor
+      description: Solar panel power production sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    battery_threshold:
+      name: Battery SOC Threshold
+      description: Trigger when battery exceeds this percentage
+      default: 90
+      selector:
+        number:
+          min: 70
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+
+    pv_power_threshold:
+      name: PV Power Threshold
+      description: Minimum PV production to trigger optimization (watts)
+      default: 2000
+      selector:
+        number:
+          min: 500
+          max: 10000
+          step: 100
+          unit_of_measurement: "W"
+
+    priority_select:
+      name: Priority Select Entity
+      description: Energy priority select entity
+      selector:
+        entity:
+          domain: select
+
+    target_priority:
+      name: Target Priority Mode
+      description: Which priority to switch to during excess solar
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Battery First"
+
+    enable_ac_output:
+      name: Enable AC Output
+      description: Automatically enable AC output when conditions are met
+      default: false
+      selector:
+        boolean:
+
+    ac_power_switch:
+      name: AC Power Switch (Optional)
+      description: AC power switch entity (required if enable AC output is true)
+      default: {}
+      selector:
+        entity:
+          domain: switch
+
+    send_notification:
+      name: Send Notification
+      description: Notify when optimization is triggered
+      default: true
+      selector:
+        boolean:
+
+    notification_service:
+      name: Notification Service
+      description: The notification service to use
+      default: ""
+      selector:
+        text:
+
+    hysteresis_duration:
+      name: Hysteresis Duration
+      description: How long conditions must be met before triggering (prevents flapping)
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 1
+          unit_of_measurement: "minutes"
+
+trigger:
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    above: !input battery_threshold
+    for:
+      minutes: !input hysteresis_duration
+  - platform: numeric_state
+    entity_id: !input pv_power_sensor
+    above: !input pv_power_threshold
+    for:
+      minutes: !input hysteresis_duration
+
+condition:
+  # Both conditions must be true
+  - condition: numeric_state
+    entity_id: !input battery_soc_sensor
+    above: !input battery_threshold
+  - condition: numeric_state
+    entity_id: !input pv_power_sensor
+    above: !input pv_power_threshold
+  # Only during daylight hours
+  - condition: sun
+    after: sunrise
+    before: sunset
+
+action:
+  - variables:
+      soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      pv_power: "{{ states(pv_power_sensor) | float(0) }}"
+
+  # Switch to solar optimization priority
+  - service: select.select_option
+    target:
+      entity_id: !input priority_select
+    data:
+      option: !input target_priority
+
+  # Optional: Enable AC output
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ enable_ac_output }}"
+          - condition: template
+            value_template: "{{ ac_power_switch is defined and ac_power_switch != none }}"
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: !input ac_power_switch
+
+  # Optional: Send notification
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ send_notification }}"
+          - condition: template
+            value_template: "{{ notification_service | length > 0 }}"
+        sequence:
+          - service: !input notification_service
+            data:
+              title: "Solar Optimization Active"
+              message: >
+                Battery at {{ soc }}% and PV producing {{ pv_power }}W.
+                Switched to {{ target_priority }} to maximize solar usage.
+              data:
+                tag: "srne_solar_optimization"
+                priority: low
+
+mode: single
+max_exceeded: silent

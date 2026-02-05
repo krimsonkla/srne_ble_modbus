@@ -1,0 +1,549 @@
+blueprint:
+  name: "SRNE Inverter - Thermal Stress Protector"
+  description: >
+    Advanced temperature-based power derating and protection system. Implements graduated current
+    reduction at multiple temperature thresholds (50°C, 60°C, 70°C) to prevent thermal damage.
+    Performs emergency shutdown at critical temperatures and supports automatic recovery when
+    temperatures normalize.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/1_safety/thermal_stress_protector.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    temperature_sensor:
+      name: Temperature Sensor
+      description: Battery or inverter temperature sensor for monitoring
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    charge_current_number:
+      name: Charge Current Control
+      description: Number entity to control battery charge current
+      selector:
+        entity:
+          domain: number
+
+    discharge_current_number:
+      name: Discharge Current Control (Optional)
+      description: Number entity to control discharge current (if available)
+      default: {}
+      selector:
+        entity:
+          domain: number
+
+    priority_select:
+      name: Energy Priority Select
+      description: Energy priority select entity
+      selector:
+        entity:
+          domain: select
+
+    ac_output_switch:
+      name: AC Output Switch (Optional)
+      description: Switch to control AC output for emergency shutdown
+      default: {}
+      selector:
+        entity:
+          domain: switch
+
+    # Temperature thresholds for graduated derating
+    temp_normal:
+      name: Normal Operating Temperature
+      description: Normal temperature threshold - no derating (°C)
+      default: 45
+      selector:
+        number:
+          min: 35
+          max: 55
+          step: 1
+          unit_of_measurement: "°C"
+
+    temp_level_1:
+      name: Level 1 Derating Temperature
+      description: First derating level - minor reduction (°C)
+      default: 50
+      selector:
+        number:
+          min: 40
+          max: 60
+          step: 1
+          unit_of_measurement: "°C"
+
+    temp_level_2:
+      name: Level 2 Derating Temperature
+      description: Second derating level - moderate reduction (°C)
+      default: 60
+      selector:
+        number:
+          min: 50
+          max: 70
+          step: 1
+          unit_of_measurement: "°C"
+
+    temp_level_3:
+      name: Level 3 Derating Temperature
+      description: Third derating level - severe reduction (°C)
+      default: 70
+      selector:
+        number:
+          min: 60
+          max: 80
+          step: 1
+          unit_of_measurement: "°C"
+
+    temp_critical:
+      name: Critical Temperature
+      description: Emergency shutdown temperature (°C)
+      default: 75
+      selector:
+        number:
+          min: 70
+          max: 85
+          step: 1
+          unit_of_measurement: "°C"
+
+    # Derating percentages
+    derate_level_1:
+      name: Level 1 Derating Percentage
+      description: Current reduction at level 1 (% of normal)
+      default: 80
+      selector:
+        number:
+          min: 50
+          max: 90
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    derate_level_2:
+      name: Level 2 Derating Percentage
+      description: Current reduction at level 2 (% of normal)
+      default: 60
+      selector:
+        number:
+          min: 30
+          max: 70
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    derate_level_3:
+      name: Level 3 Derating Percentage
+      description: Current reduction at level 3 (% of normal)
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 50
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    # Normal operating currents (for derating calculation)
+    normal_charge_current:
+      name: Normal Charge Current
+      description: Standard charge current at normal temperature (amps)
+      default: 120
+      selector:
+        number:
+          min: 20
+          max: 200
+          step: 5
+          unit_of_measurement: "A"
+
+    normal_discharge_current:
+      name: Normal Discharge Current
+      description: Standard discharge current at normal temperature (amps)
+      default: 100
+      selector:
+        number:
+          min: 20
+          max: 200
+          step: 5
+          unit_of_measurement: "A"
+
+    # Recovery settings
+    recovery_hysteresis:
+      name: Recovery Temperature Hysteresis
+      description: Temperature must drop this much below threshold to recover (°C)
+      default: 5
+      selector:
+        number:
+          min: 2
+          max: 10
+          step: 1
+          unit_of_measurement: "°C"
+
+    recovery_delay:
+      name: Recovery Delay
+      description: Wait time at safe temperature before recovering (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: "minutes"
+
+    enable_auto_recovery:
+      name: Enable Automatic Recovery
+      description: Automatically restore normal operation when temperature drops
+      default: true
+      selector:
+        boolean:
+
+    # Emergency shutdown settings
+    enable_emergency_shutdown:
+      name: Enable Emergency Shutdown
+      description: Shut down AC output at critical temperature
+      default: true
+      selector:
+        boolean:
+
+    emergency_safe_mode:
+      name: Emergency Safe Mode Priority
+      description: Priority mode during emergency
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Utility First"
+            - "Solar First"
+
+    # Notification settings
+    notification_service_1:
+      name: Primary Notification Service
+      description: Critical alert notification service
+      selector:
+        text:
+
+    notification_service_2:
+      name: Secondary Notification Service (Optional)
+      description: Secondary notification service for redundancy
+      default: ""
+      selector:
+        text:
+
+    notify_on_derating:
+      name: Notify on Derating
+      description: Send notification when derating is applied
+      default: true
+      selector:
+        boolean:
+
+    notify_on_recovery:
+      name: Notify on Recovery
+      description: Send notification when normal operation resumes
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # Temperature monitoring triggers
+  - platform: numeric_state
+    entity_id: !input temperature_sensor
+    above: !input temp_level_1
+    id: "temp_level_1"
+
+  - platform: numeric_state
+    entity_id: !input temperature_sensor
+    above: !input temp_level_2
+    id: "temp_level_2"
+
+  - platform: numeric_state
+    entity_id: !input temperature_sensor
+    above: !input temp_level_3
+    id: "temp_level_3"
+
+  - platform: numeric_state
+    entity_id: !input temperature_sensor
+    above: !input temp_critical
+    id: "temp_critical"
+
+  # Recovery triggers (with hysteresis)
+  - platform: numeric_state
+    entity_id: !input temperature_sensor
+    below: !input temp_normal
+    for:
+      minutes: !input recovery_delay
+    id: "temp_recovered"
+
+  # Periodic check
+  - platform: time_pattern
+    minutes: "/5"
+    id: "periodic_check"
+
+condition: []
+
+action:
+  - variables:
+      temperature: "{{ states(temperature_sensor) | float(0) }}"
+      temp_normal: !input temp_normal
+      temp_l1: !input temp_level_1
+      temp_l2: !input temp_level_2
+      temp_l3: !input temp_level_3
+      temp_crit: !input temp_critical
+      hysteresis: !input recovery_hysteresis
+      derate_l1: !input derate_level_1
+      derate_l2: !input derate_level_2
+      derate_l3: !input derate_level_3
+      normal_charge: !input normal_charge_current
+      normal_discharge: !input normal_discharge_current
+      enable_auto_recovery: !input enable_auto_recovery
+      enable_shutdown: !input enable_emergency_shutdown
+
+  # Determine current thermal level and required action
+  - variables:
+      thermal_level: >
+        {% if temperature >= temp_crit %}
+          critical
+        {% elif temperature >= temp_l3 %}
+          level_3
+        {% elif temperature >= temp_l2 %}
+          level_2
+        {% elif temperature >= temp_l1 %}
+          level_1
+        {% elif temperature < (temp_normal - hysteresis) %}
+          normal
+        {% else %}
+          normal
+        {% endif %}
+
+      target_charge_current: >
+        {% if thermal_level == 'critical' %}
+          0
+        {% elif thermal_level == 'level_3' %}
+          {{ (normal_charge * derate_l3 / 100) | round(0) }}
+        {% elif thermal_level == 'level_2' %}
+          {{ (normal_charge * derate_l2 / 100) | round(0) }}
+        {% elif thermal_level == 'level_1' %}
+          {{ (normal_charge * derate_l1 / 100) | round(0) }}
+        {% else %}
+          {{ normal_charge }}
+        {% endif %}
+
+      target_discharge_current: >
+        {% if discharge_current_number is defined and discharge_current_number != none %}
+          {% if thermal_level == 'critical' %}
+            0
+          {% elif thermal_level == 'level_3' %}
+            {{ (normal_discharge * derate_l3 / 100) | round(0) }}
+          {% elif thermal_level == 'level_2' %}
+            {{ (normal_discharge * derate_l2 / 100) | round(0) }}
+          {% elif thermal_level == 'level_1' %}
+            {{ (normal_discharge * derate_l1 / 100) | round(0) }}
+          {% else %}
+            {{ normal_discharge }}
+          {% endif %}
+        {% else %}
+          0
+        {% endif %}
+
+      current_charge_setting: "{{ states(charge_current_number) | float(0) }}"
+
+  # Execute actions based on thermal level
+  - choose:
+      # CRITICAL TEMPERATURE - Emergency Shutdown
+      - conditions:
+          - condition: template
+            value_template: "{{ thermal_level == 'critical' }}"
+          - condition: template
+            value_template: "{{ enable_shutdown }}"
+        sequence:
+          # Reduce currents to zero
+          - service: number.set_value
+            target:
+              entity_id: !input charge_current_number
+            data:
+              value: 0
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ discharge_current_number is defined and discharge_current_number != none }}"
+                sequence:
+                  - service: number.set_value
+                    target:
+                      entity_id: !input discharge_current_number
+                    data:
+                      value: 0
+
+          # Switch to safe mode
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input emergency_safe_mode
+
+          # Shutdown AC output if available
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ ac_output_switch is defined and ac_output_switch != none }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input ac_output_switch
+
+          # Critical notifications
+          - service: !input notification_service_1
+            data:
+              title: "🚨 CRITICAL: Thermal Shutdown"
+              message: >
+                EMERGENCY: Temperature critical at {{ temperature }}°C!
+
+                Actions taken:
+                - All charging/discharging stopped
+                - AC output disabled
+                - System in safe mode
+
+                ⚠️ IMMEDIATE ATTENTION REQUIRED ⚠️
+                Check cooling system and ventilation!
+              data:
+                priority: high
+                ttl: 0
+                tag: "srne_thermal_critical"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service_2 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_2
+                    data:
+                      title: "🚨 THERMAL EMERGENCY"
+                      message: "Inverter shutdown at {{ temperature }}°C! Immediate attention required!"
+
+          - service: system_log.write
+            data:
+              message: >
+                THERMAL EMERGENCY: Critical temperature {{ temperature }}°C
+                Emergency shutdown activated
+              level: critical
+              logger: homeassistant.components.srne_ble_modbus.thermal
+
+      # DERATING LEVELS - Graduated current reduction
+      - conditions:
+          - condition: template
+            value_template: "{{ thermal_level in ['level_1', 'level_2', 'level_3'] }}"
+          - condition: template
+            value_template: "{{ target_charge_current != current_charge_setting }}"
+        sequence:
+          # Apply derating
+          - service: number.set_value
+            target:
+              entity_id: !input charge_current_number
+            data:
+              value: "{{ target_charge_current }}"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ discharge_current_number is defined and discharge_current_number != none }}"
+                  - condition: template
+                    value_template: "{{ target_discharge_current > 0 }}"
+                sequence:
+                  - service: number.set_value
+                    target:
+                      entity_id: !input discharge_current_number
+                    data:
+                      value: "{{ target_discharge_current }}"
+
+          - service: system_log.write
+            data:
+              message: >
+                Thermal Derating {{ thermal_level }}: Temperature {{ temperature }}°C
+                Charge current reduced to {{ target_charge_current }}A
+                ({{ (target_charge_current / normal_charge * 100) | round(0) }}% of normal)
+              level: warning
+              logger: homeassistant.components.srne_ble_modbus.thermal
+
+          # Derating notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_derating }}"
+                  - condition: template
+                    value_template: "{{ notification_service_1 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_1
+                    data:
+                      title: "⚠️ Thermal Derating Active"
+                      message: >
+                        Power reduced due to high temperature
+
+                        Temperature: {{ temperature }}°C
+                        Level: {{ thermal_level | upper }}
+                        Charge current: {{ target_charge_current }}A
+                        ({{ (target_charge_current / normal_charge * 100) | round(0) }}% of normal)
+
+                        System will recover automatically when temperature drops.
+                      data:
+                        tag: "srne_thermal_derate"
+                        priority: high
+
+      # RECOVERY - Restore normal operation
+      - conditions:
+          - condition: template
+            value_template: "{{ thermal_level == 'normal' and enable_auto_recovery }}"
+          - condition: template
+            value_template: "{{ current_charge_setting < normal_charge }}"
+        sequence:
+          # Restore normal currents
+          - service: number.set_value
+            target:
+              entity_id: !input charge_current_number
+            data:
+              value: "{{ normal_charge }}"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ discharge_current_number is defined and discharge_current_number != none }}"
+                sequence:
+                  - service: number.set_value
+                    target:
+                      entity_id: !input discharge_current_number
+                    data:
+                      value: "{{ normal_discharge }}"
+
+          - service: system_log.write
+            data:
+              message: >
+                Thermal Recovery: Temperature normalized at {{ temperature }}°C
+                Normal operation restored
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.thermal
+
+          # Recovery notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_recovery }}"
+                  - condition: template
+                    value_template: "{{ notification_service_1 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_1
+                    data:
+                      title: "✅ Thermal Protection Cleared"
+                      message: >
+                        Temperature normalized - normal operation resumed
+
+                        Current temperature: {{ temperature }}°C
+                        Charge current: {{ normal_charge }}A (100%)
+
+                        System operating normally.
+                      data:
+                        tag: "srne_thermal_derate"
+
+mode: queued
+max: 5

@@ -1,0 +1,691 @@
+blueprint:
+  name: "SRNE Inverter - Seasonal Parameter Adjuster"
+  description: >
+    Automatically adjusts inverter parameters based on seasonal conditions to optimize
+    performance and battery longevity. Switches between winter and summer modes with
+    configurable date ranges and parameter sets.
+
+
+    Features:
+    - Automatic seasonal mode switching
+    - Configurable winter mode (conservative charging, low temp protection)
+    - Configurable summer mode (aggressive charging, high temp protection)
+    - Temperature-based overrides
+    - Manual mode override capability
+    - Transition period support (spring/fall)
+    - Notification on mode changes
+    - Historical tracking
+
+
+    Use Cases:
+    - Cold climate: Protect batteries from low temperatures
+    - Hot climate: Prevent overcharging in high heat
+    - Variable climate: Optimize for seasonal solar availability
+    - Battery longevity: Adjust charge rates based on conditions
+
+
+    Requirements:
+    - SRNE Inverter with writable parameters
+    - Temperature sensor (optional but recommended)
+    - Input boolean helper for manual override (optional)
+
+  domain: automation
+  author: "SRNE Inverter Integration - Advanced"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/3_monitoring/seasonal_parameter_adjuster.yaml
+
+  input:
+    # Device Selection
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    # Temperature Sensors (Optional)
+    battery_temperature_sensor:
+      name: Battery Temperature Sensor (Optional)
+      description: Used for temperature-based overrides
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    ambient_temperature_sensor:
+      name: Ambient Temperature Sensor (Optional)
+      description: For additional environmental context
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    # Manual Override
+    manual_override_switch:
+      name: Manual Override Switch (Optional)
+      description: Input boolean to disable automatic switching
+      default: {}
+      selector:
+        entity:
+          domain: input_boolean
+
+    # Season Definitions - Northern Hemisphere Defaults
+    winter_start_month:
+      name: Winter Start Month
+      description: Month when winter mode begins (1-12)
+      default: 11
+      selector:
+        number:
+          min: 1
+          max: 12
+          step: 1
+          mode: slider
+
+    winter_start_day:
+      name: Winter Start Day
+      description: Day of month when winter mode begins
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 31
+          step: 1
+          mode: slider
+
+    winter_end_month:
+      name: Winter End Month
+      description: Month when winter mode ends (1-12)
+      default: 4
+      selector:
+        number:
+          min: 1
+          max: 12
+          step: 1
+          mode: slider
+
+    winter_end_day:
+      name: Winter End Day
+      description: Day of month when winter mode ends
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 31
+          step: 1
+          mode: slider
+
+    # Winter Mode Parameters
+    winter_battery_charge_voltage:
+      name: Winter - Battery Charge Voltage
+      description: Conservative charging voltage for winter (V)
+      default: 55.0
+      selector:
+        number:
+          min: 48.0
+          max: 60.0
+          step: 0.1
+          unit_of_measurement: "V"
+          mode: box
+
+    winter_battery_float_voltage:
+      name: Winter - Battery Float Voltage
+      description: Float voltage for winter (V)
+      default: 54.0
+      selector:
+        number:
+          min: 48.0
+          max: 58.0
+          step: 0.1
+          unit_of_measurement: "V"
+          mode: box
+
+    winter_max_charge_current:
+      name: Winter - Max Charge Current
+      description: Reduced charge current for cold weather (A)
+      default: 40
+      selector:
+        number:
+          min: 10
+          max: 100
+          step: 5
+          unit_of_measurement: "A"
+          mode: slider
+
+    winter_max_discharge_current:
+      name: Winter - Max Discharge Current
+      description: Limited discharge current for winter (A)
+      default: 40
+      selector:
+        number:
+          min: 10
+          max: 100
+          step: 5
+          unit_of_measurement: "A"
+          mode: slider
+
+    winter_low_temp_cutoff:
+      name: Winter - Low Temperature Cutoff
+      description: Stop charging below this temperature (°C)
+      default: 0
+      selector:
+        number:
+          min: -20
+          max: 10
+          step: 1
+          unit_of_measurement: "°C"
+          mode: box
+
+    winter_energy_priority:
+      name: Winter - Energy Priority Mode
+      description: Priority setting for winter
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Utility First"
+            - "Battery First"
+            - "SBU (Solar-Battery-Utility)"
+
+    winter_battery_type:
+      name: Winter - Battery Type Setting
+      description: Battery type configuration for winter (some inverters auto-adjust parameters)
+      default: "Lithium"
+      selector:
+        select:
+          options:
+            - "Lithium"
+            - "AGM"
+            - "Flooded"
+            - "User Defined"
+
+    # Summer Mode Parameters
+    summer_battery_charge_voltage:
+      name: Summer - Battery Charge Voltage
+      description: Optimized charging voltage for summer (V)
+      default: 56.0
+      selector:
+        number:
+          min: 48.0
+          max: 60.0
+          step: 0.1
+          unit_of_measurement: "V"
+          mode: box
+
+    summer_battery_float_voltage:
+      name: Summer - Battery Float Voltage
+      description: Float voltage for summer (V)
+      default: 54.5
+      selector:
+        number:
+          min: 48.0
+          max: 58.0
+          step: 0.1
+          unit_of_measurement: "V"
+          mode: box
+
+    summer_max_charge_current:
+      name: Summer - Max Charge Current
+      description: Aggressive charge current for summer (A)
+      default: 60
+      selector:
+        number:
+          min: 10
+          max: 100
+          step: 5
+          unit_of_measurement: "A"
+          mode: slider
+
+    summer_max_discharge_current:
+      name: Summer - Max Discharge Current
+      description: Higher discharge current for summer (A)
+      default: 60
+      selector:
+        number:
+          min: 10
+          max: 100
+          step: 5
+          unit_of_measurement: "A"
+          mode: slider
+
+    summer_high_temp_cutoff:
+      name: Summer - High Temperature Cutoff
+      description: Reduce charging above this temperature (°C)
+      default: 40
+      selector:
+        number:
+          min: 30
+          max: 60
+          step: 1
+          unit_of_measurement: "°C"
+          mode: box
+
+    summer_energy_priority:
+      name: Summer - Energy Priority Mode
+      description: Priority setting for summer
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Utility First"
+            - "Battery First"
+            - "SBU (Solar-Battery-Utility)"
+
+    summer_battery_type:
+      name: Summer - Battery Type Setting
+      description: Battery type configuration for summer
+      default: "Lithium"
+      selector:
+        select:
+          options:
+            - "Lithium"
+            - "AGM"
+            - "Flooded"
+            - "User Defined"
+
+    # Temperature Override Settings
+    enable_temp_override:
+      name: Enable Temperature Override
+      description: Override seasonal settings based on actual temperature
+      default: true
+      selector:
+        boolean:
+
+    extreme_cold_threshold:
+      name: Extreme Cold Threshold
+      description: Force winter mode below this temp regardless of season (°C)
+      default: -5
+      selector:
+        number:
+          min: -20
+          max: 5
+          step: 1
+          unit_of_measurement: "°C"
+          mode: box
+
+    extreme_heat_threshold:
+      name: Extreme Heat Threshold
+      description: Force reduced charging above this temp regardless of season (°C)
+      default: 45
+      selector:
+        number:
+          min: 35
+          max: 60
+          step: 1
+          unit_of_measurement: "°C"
+          mode: box
+
+    # Transition Period
+    use_transition_period:
+      name: Use Transition Period
+      description: Gradually transition between winter and summer settings
+      default: false
+      selector:
+        boolean:
+
+    transition_duration_days:
+      name: Transition Duration
+      description: Number of days to gradually transition between modes
+      default: 7
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: "days"
+          mode: slider
+
+    # Notifications
+    notification_service:
+      name: Notification Service
+      description: Service to notify on mode changes (e.g., notify.mobile_app_phone)
+      default: ""
+      selector:
+        text:
+
+    notify_on_mode_change:
+      name: Notify on Mode Change
+      description: Send notification when seasonal mode changes
+      default: true
+      selector:
+        boolean:
+
+    notify_on_temp_override:
+      name: Notify on Temperature Override
+      description: Send notification when temperature overrides seasonal mode
+      default: true
+      selector:
+        boolean:
+
+    # Advanced Options
+    check_frequency_hours:
+      name: Check Frequency
+      description: How often to check and apply seasonal settings (hours)
+      default: 6
+      selector:
+        number:
+          min: 1
+          max: 24
+          step: 1
+          unit_of_measurement: "hours"
+          mode: slider
+
+    create_status_sensor:
+      name: Create Status Sensor
+      description: Create a sensor showing current seasonal mode (requires sensor template helper)
+      default: false
+      selector:
+        boolean:
+
+trigger:
+  # Check at startup
+  - platform: homeassistant
+    event: start
+
+  # Regular interval check
+  - platform: time_pattern
+    hours: "/{{ check_frequency_hours }}"
+
+  # Temperature-based triggers (if sensor provided)
+  - platform: state
+    entity_id: !input battery_temperature_sensor
+    attribute: state
+
+  # Daily check at midnight
+  - platform: time
+    at: "00:00:01"
+
+condition:
+  # Skip if manual override is enabled
+  - condition: template
+    value_template: >
+      {% set override = manual_override_switch %}
+      {{ override in ['', 'unknown', 'unavailable', none] or states(override) == 'off' }}
+
+variables:
+  # Current date info
+  current_month: "{{ now().month }}"
+  current_day: "{{ now().day }}"
+
+  # Season boundaries
+  winter_start: "{{ (winter_start_month | int) * 100 + (winter_start_day | int) }}"
+  winter_end: "{{ (winter_end_month | int) * 100 + (winter_end_day | int) }}"
+  current_date: "{{ (current_month | int) * 100 + (current_day | int) }}"
+
+  # Determine current season
+  is_winter: >
+    {% set start = winter_start | int %}
+    {% set end = winter_end | int %}
+    {% set curr = current_date | int %}
+    {% if start > end %}
+      {# Winter crosses year boundary (e.g., Nov-Apr) #}
+      {{ curr >= start or curr <= end }}
+    {% else %}
+      {# Winter within same year #}
+      {{ curr >= start and curr <= end }}
+    {% endif %}
+
+  # Temperature readings
+  battery_temp: >
+    {% set sensor = battery_temperature_sensor %}
+    {% if sensor not in ['', 'unknown', 'unavailable', none] %}
+      {{ states(sensor) | float(20) }}
+    {% else %}
+      20
+    {% endif %}
+
+  ambient_temp: >
+    {% set sensor = ambient_temperature_sensor %}
+    {% if sensor not in ['', 'unknown', 'unavailable', none] %}
+      {{ states(sensor) | float(20) }}
+    {% else %}
+      20
+    {% endif %}
+
+  # Temperature override logic
+  force_winter_mode: >
+    {% if enable_temp_override %}
+      {{ battery_temp < extreme_cold_threshold or ambient_temp < extreme_cold_threshold }}
+    {% else %}
+      false
+    {% endif %}
+
+  force_temp_reduction: >
+    {% if enable_temp_override %}
+      {{ battery_temp > extreme_heat_threshold or ambient_temp > extreme_heat_threshold }}
+    {% else %}
+      false
+    {% endif %}
+
+  # Final mode determination
+  active_mode: >
+    {% if force_winter_mode %}
+      winter
+    {% elif force_temp_reduction %}
+      summer_reduced
+    {% elif is_winter %}
+      winter
+    {% else %}
+      summer
+    {% endif %}
+
+  # Parameter selections based on mode
+  target_charge_voltage: >
+    {% if active_mode == 'winter' %}
+      {{ winter_battery_charge_voltage }}
+    {% elif active_mode == 'summer_reduced' %}
+      {{ summer_battery_charge_voltage - 0.5 }}
+    {% else %}
+      {{ summer_battery_charge_voltage }}
+    {% endif %}
+
+  target_float_voltage: >
+    {% if active_mode == 'winter' %}
+      {{ winter_battery_float_voltage }}
+    {% elif active_mode == 'summer_reduced' %}
+      {{ summer_battery_float_voltage - 0.3 }}
+    {% else %}
+      {{ summer_battery_float_voltage }}
+    {% endif %}
+
+  target_charge_current: >
+    {% if active_mode == 'winter' %}
+      {{ winter_max_charge_current }}
+    {% elif active_mode == 'summer_reduced' %}
+      {{ (summer_max_charge_current * 0.8) | int }}
+    {% else %}
+      {{ summer_max_charge_current }}
+    {% endif %}
+
+  target_discharge_current: >
+    {% if active_mode == 'winter' %}
+      {{ winter_max_discharge_current }}
+    {% elif active_mode == 'summer_reduced' %}
+      {{ (summer_max_discharge_current * 0.9) | int }}
+    {% else %}
+      {{ summer_max_discharge_current }}
+    {% endif %}
+
+  target_priority: >
+    {% if active_mode == 'winter' %}
+      {{ winter_energy_priority }}
+    {% else %}
+      {{ summer_energy_priority }}
+    {% endif %}
+
+  target_battery_type: >
+    {% if active_mode == 'winter' %}
+      {{ winter_battery_type }}
+    {% else %}
+      {{ summer_battery_type }}
+    {% endif %}
+
+  # Notification messages
+  mode_description: >
+    {% if active_mode == 'winter' %}
+      Winter Mode (Conservative)
+    {% elif active_mode == 'summer_reduced' %}
+      Summer Mode (Temp Reduced)
+    {% else %}
+      Summer Mode (Optimal)
+    {% endif %}
+
+action:
+  # Log mode activation
+  - service: logbook.log
+    data:
+      name: "SRNE Seasonal Adjuster"
+      message: "Activating {{ mode_description }}"
+      entity_id: !input inverter_device
+
+  # Set Battery Charge Voltage
+  - service: number.set_value
+    target:
+      entity_id: "{{ device_entities(inverter_device) | select('search', 'battery.*charge.*voltage') | list | first }}"
+    data:
+      value: "{{ target_charge_voltage }}"
+
+  # Set Battery Float Voltage
+  - service: number.set_value
+    target:
+      entity_id: "{{ device_entities(inverter_device) | select('search', 'battery.*float.*voltage') | list | first }}"
+    data:
+      value: "{{ target_float_voltage }}"
+
+  # Set Max Charge Current
+  - service: number.set_value
+    target:
+      entity_id: "{{ device_entities(inverter_device) | select('search', '.*charge.*current') | list | first }}"
+    data:
+      value: "{{ target_charge_current }}"
+
+  # Set Max Discharge Current (if available)
+  - service: number.set_value
+    target:
+      entity_id: "{{ device_entities(inverter_device) | select('search', '.*discharge.*current') | list | first }}"
+    data:
+      value: "{{ target_discharge_current }}"
+    continue_on_error: true
+
+  # Set Energy Priority
+  - service: select.select_option
+    target:
+      entity_id: "{{ device_entities(inverter_device) | select('search', 'energy.*priority') | list | first }}"
+    data:
+      option: "{{ target_priority }}"
+    continue_on_error: true
+
+  # Set Battery Type (if different from current)
+  - service: select.select_option
+    target:
+      entity_id: "{{ device_entities(inverter_device) | select('search', 'battery.*type') | list | first }}"
+    data:
+      option: "{{ target_battery_type }}"
+    continue_on_error: true
+
+  # Send notification if enabled
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notification_service | length > 0 }}"
+          - condition: template
+            value_template: "{{ notify_on_mode_change }}"
+        sequence:
+          - service: "{{ notification_service }}"
+            data:
+              title: "SRNE Seasonal Mode Change"
+              message: >
+                🔄 Seasonal Parameter Update
+
+                Mode: {{ mode_description }}
+                Date: {{ now().strftime('%B %d, %Y') }}
+
+                Applied Settings:
+                • Charge Voltage: {{ target_charge_voltage }} V
+                • Float Voltage: {{ target_float_voltage }} V
+                • Charge Current: {{ target_charge_current }} A
+                • Discharge Current: {{ target_discharge_current }} A
+                • Priority: {{ target_priority }}
+
+                {% if force_winter_mode %}
+                ⚠️ Forced by low temperature: {{ battery_temp }}°C
+                {% elif force_temp_reduction %}
+                ⚠️ Reduced due to high temperature: {{ battery_temp }}°C
+                {% endif %}
+
+                Reason: {% if force_winter_mode %}Temperature Override{% elif force_temp_reduction %}Heat Protection{% elif is_winter %}Seasonal (Winter){% else %}Seasonal (Summer){% endif %}
+              data:
+                tag: "srne_seasonal_mode"
+                group: "srne_system"
+                importance: "high"
+
+  # Temperature override notification
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notification_service | length > 0 }}"
+          - condition: template
+            value_template: "{{ notify_on_temp_override }}"
+          - condition: template
+            value_template: "{{ force_winter_mode or force_temp_reduction }}"
+        sequence:
+          - service: "{{ notification_service }}"
+            data:
+              title: "SRNE Temperature Override"
+              message: >
+                🌡️ Temperature Override Active
+
+                {% if force_winter_mode %}
+                ❄️ EXTREME COLD PROTECTION
+                Battery: {{ battery_temp }}°C
+                Ambient: {{ ambient_temp }}°C
+                Threshold: {{ extreme_cold_threshold }}°C
+
+                Actions:
+                • Reduced charge rate
+                • Conservative voltages
+                • Limited discharge
+                {% else %}
+                🔥 HEAT PROTECTION MODE
+                Battery: {{ battery_temp }}°C
+                Ambient: {{ ambient_temp }}°C
+                Threshold: {{ extreme_heat_threshold }}°C
+
+                Actions:
+                • Reduced charge voltage
+                • Limited charge current
+                • Enhanced cooling period
+                {% endif %}
+
+                Monitor conditions and system will auto-adjust.
+              data:
+                tag: "srne_temp_override"
+                group: "srne_alerts"
+                importance: "high"
+
+  # Create persistent notification with status
+  - service: persistent_notification.create
+    data:
+      title: "Seasonal Mode: {{ mode_description }}"
+      message: >
+        Last Update: {{ now().strftime('%Y-%m-%d %H:%M:%S') }}
+
+        Current Settings:
+        • Mode: {{ mode_description }}
+        • Charge Voltage: {{ target_charge_voltage }} V
+        • Float Voltage: {{ target_float_voltage }} V
+        • Charge Current: {{ target_charge_current }} A
+        • Discharge Current: {{ target_discharge_current }} A
+        • Priority: {{ target_priority }}
+
+        Temperature Status:
+        • Battery: {{ battery_temp }}°C
+        • Ambient: {{ ambient_temp }}°C
+
+        Next check: {{ (now().timestamp() + (check_frequency_hours * 3600)) | timestamp_custom('%H:%M') }}
+      notification_id: "srne_seasonal_status"
+
+mode: single
+max_exceeded: silent

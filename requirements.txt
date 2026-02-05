@@ -1,0 +1,76 @@
+# SRNE BLE Modbus Integration - Local Testing Requirements
+# ============================================================
+# Install with: pip install -r requirements.txt
+#
+# For local Home Assistant Core testing on macOS with BLE support
+# See docs/LOCAL-TESTING-GUIDE.md for detailed setup instructions
+
+# ==============================================================================
+# Home Assistant Core (Required for local testing)
+# ==============================================================================
+# Use stable 2024.12.x LTS version (matches manifest.json requirement)
+homeassistant
+
+# ==============================================================================
+# Dependency Fixes for Local Development
+# ==============================================================================
+# Fix aiodns/aiohttp compatibility issue in HA 2024.12.x
+# aiodns 3.2.0 has breaking API changes; 3.1.1 is stable
+# This affects homeassistant_alerts component, not SRNE integration
+aiodns==3.1.1
+
+# ==============================================================================
+# Integration Dependencies (from manifest.json)
+# ==============================================================================
+# BLE communication library (cross-platform, uses Core Bluetooth on macOS)
+bleak>=0.21.0
+
+# BLE connection reliability and retry logic
+bleak-retry-connector>=3.4.0
+
+# ==============================================================================
+# Development Tools (Optional but Recommended)
+# ==============================================================================
+# Code formatting
+black>=23.0.0
+isort>=5.12.0
+
+# Linting
+pylint>=3.0.0
+flake8>=6.0.0
+
+# Type checking
+mypy>=1.5.0
+
+# ==============================================================================
+# Additional Dependencies
+# ==============================================================================
+# Serial communication (if needed for testing)
+pyserial>=3.5
+
+# YAML configuration handling (for testing configuration.yaml)
+pyyaml>=6.0
+
+# Jinja2 templates (used by HA for templating)
+jinja2>=3.1.0
+
+# other
+ffmpeg
+exceptiongroup~=1.2.0
+click~=8.1.8
+jsonschema~=4.25.1
+mcp==1.16.0
+opentelemetry-api~=1.37.0
+opentelemetry-exporter-otlp-proto-http~=1.37.0
+opentelemetry-instrumentation-requests~=0.58b0
+opentelemetry-sdk~=1.37.0
+rich~=13.5.2
+tomli~=2.0.1
+urllib3
+wcmatch~=8.3
+pydantic
+aiohttp-fast-zlib
+zlib-ng
+isal
+turbojpeg
+PyTurboJPEG

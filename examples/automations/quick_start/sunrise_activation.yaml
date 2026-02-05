@@ -1,0 +1,36 @@
+# Sunrise Activation
+# Turns on inverter at sunrise to begin PV charging
+#
+# Requirements:
+# - switch.srne_inverter_power (Inverter power switch)
+# - sun.sun (Home Assistant sun integration)
+#
+# Usage:
+# 1. Copy this file to your config/automations directory
+# 2. Ensure sun integration is configured (add 'sun:' to configuration.yaml)
+# 3. Adjust offset if you want to start before/after sunrise
+# 4. Add latitude/longitude to configuration.yaml for accurate sunrise times
+
+automation:
+  - alias: "SRNE: Sunrise Activation"
+    description: "Turn on inverter at sunrise"
+
+    trigger:
+      - platform: sun
+        event: sunrise
+        offset: "-00:15:00"  # 15 minutes before sunrise
+
+    condition:
+      - condition: state
+        entity_id: switch.srne_inverter_power
+        state: "off"
+
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.srne_inverter_power
+
+      - service: notify.notify
+        data:
+          title: "Inverter Sunrise Start"
+          message: "SRNE inverter activated for PV production. Sunrise at {{ state_attr('sun.sun', 'next_rising') }}."

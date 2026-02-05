@@ -1,0 +1,32 @@
+# PV Production Daily Tracker
+# Sends daily summary of PV production at sunset
+#
+# Requirements:
+# - sensor.srne_inverter_pv_power (PV power sensor)
+# - sensor.srne_inverter_pv_energy_today (Daily PV energy sensor)
+# - sun.sun (Home Assistant sun integration)
+#
+# Usage:
+# 1. Copy this file to your config/automations directory
+# 2. Ensure sun integration is configured (add 'sun:' to configuration.yaml)
+# 3. Adjust notification time offset if needed
+
+automation:
+  - alias: "SRNE: Daily PV Summary"
+    description: "Send daily PV production summary at sunset"
+
+    trigger:
+      - platform: sun
+        event: sunset
+        offset: "+00:30:00"  # 30 minutes after sunset
+
+    action:
+      - service: notify.notify
+        data:
+          title: "Daily PV Production Summary"
+          message: >
+            PV Production Today: {{ states('sensor.srne_inverter_pv_energy_today') }} kWh
+            Current PV Power: {{ states('sensor.srne_inverter_pv_power') }}W
+            Battery SOC: {{ states('sensor.srne_inverter_battery_soc') }}%
+
+            Peak Production: {{ state_attr('sensor.srne_inverter_pv_power', 'max_today') | default('N/A') }}W

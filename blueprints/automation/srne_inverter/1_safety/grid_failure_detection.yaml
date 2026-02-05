@@ -1,0 +1,322 @@
+blueprint:
+  name: "SRNE Inverter - Grid Failure Detection"
+  description: >
+    Detects grid power failures and automatically switches to battery backup.
+    Provides notifications and can optionally shed non-essential loads.
+    Restores normal operation when grid returns.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/grid_failure_detection.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    grid_voltage_sensor:
+      name: Grid Voltage Sensor
+      description: Grid voltage sensor (AC input voltage)
+      selector:
+        entity:
+          domain: sensor
+          device_class: voltage
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    priority_select:
+      name: Priority Select Entity
+      description: Energy priority select entity
+      selector:
+        entity:
+          domain: select
+
+    grid_failure_priority:
+      name: Grid Failure Priority
+      description: Priority mode during grid failure
+      default: "Battery First"
+      selector:
+        select:
+          options:
+            - "Battery First"
+            - "Solar First"
+
+    normal_priority:
+      name: Normal Priority
+      description: Priority mode to restore when grid returns
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Utility First"
+            - "Battery First"
+
+    grid_voltage_threshold:
+      name: Grid Voltage Threshold
+      description: Voltage below which grid is considered failed
+      default: 100
+      selector:
+        number:
+          min: 50
+          max: 150
+          step: 10
+          unit_of_measurement: "V"
+
+    grid_restore_threshold:
+      name: Grid Restore Threshold
+      description: Voltage above which grid is considered restored
+      default: 200
+      selector:
+        number:
+          min: 180
+          max: 250
+          step: 10
+          unit_of_measurement: "V"
+
+    minimum_battery_soc:
+      name: Minimum Battery SOC Warning
+      description: Warn if battery drops below this during grid failure
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 50
+          step: 5
+          unit_of_measurement: "%"
+
+    notification_service:
+      name: Notification Service
+      description: Service for grid failure alerts
+      selector:
+        text:
+
+    enable_load_shedding:
+      name: Enable Load Shedding
+      description: Automatically turn off non-essential loads during grid failure
+      default: false
+      selector:
+        boolean:
+
+    load_shedding_switches:
+      name: Load Shedding Switches
+      description: Switches to turn off during grid failure (separate multiple with commas)
+      default: []
+      selector:
+        entity:
+          domain: switch
+          multiple: true
+
+    load_shedding_delay:
+      name: Load Shedding Delay
+      description: Wait time before shedding loads (to avoid false triggers)
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 5
+          unit_of_measurement: "minutes"
+
+    grid_failure_hysteresis:
+      name: Grid Failure Detection Delay
+      description: Voltage must be low for this duration to confirm failure
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 120
+          step: 10
+          unit_of_measurement: "seconds"
+
+    grid_restore_hysteresis:
+      name: Grid Restore Detection Delay
+      description: Voltage must be stable for this duration to confirm restore
+      default: 60
+      selector:
+        number:
+          min: 30
+          max: 300
+          step: 30
+          unit_of_measurement: "seconds"
+
+trigger:
+  # Grid failure detected
+  - platform: numeric_state
+    entity_id: !input grid_voltage_sensor
+    below: !input grid_voltage_threshold
+    for:
+      seconds: !input grid_failure_hysteresis
+    id: "grid_failure"
+
+  # Grid restored
+  - platform: numeric_state
+    entity_id: !input grid_voltage_sensor
+    above: !input grid_restore_threshold
+    for:
+      seconds: !input grid_restore_hysteresis
+    id: "grid_restore"
+
+  # Low battery during grid failure
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input minimum_battery_soc
+    id: "low_battery_warning"
+
+condition: []
+
+action:
+  - variables:
+      grid_voltage: "{{ states(grid_voltage_sensor) | float(0) }}"
+      battery_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      timestamp: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  - choose:
+      # Grid failure detected
+      - conditions:
+          - condition: trigger
+            id: "grid_failure"
+        sequence:
+          # Immediately switch to battery priority
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input grid_failure_priority
+
+          # Send critical notification
+          - service: !input notification_service
+            data:
+              title: "⚡ GRID FAILURE DETECTED"
+              message: >
+                Grid power lost at {{ timestamp }}
+
+                Status:
+                - Grid Voltage: {{ grid_voltage }}V
+                - Battery SOC: {{ battery_soc }}%
+                - Mode: Switched to {{ grid_failure_priority }}
+
+                {% if enable_load_shedding %}
+                Non-essential loads will be shed in {{ load_shedding_delay }} minutes.
+                {% endif %}
+              data:
+                priority: high
+                ttl: 0
+                tag: "srne_grid_failure"
+
+          # Log event
+          - service: system_log.write
+            data:
+              message: >
+                Grid failure detected: {{ grid_voltage }}V, Battery: {{ battery_soc }}%
+              level: warning
+              logger: homeassistant.components.srne_ble_modbus
+
+          # Optional load shedding
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_load_shedding }}"
+                  - condition: template
+                    value_template: "{{ load_shedding_switches | length > 0 }}"
+                sequence:
+                  # Wait before shedding
+                  - delay:
+                      minutes: !input load_shedding_delay
+
+                  # Check if grid still failed
+                  - condition: numeric_state
+                    entity_id: !input grid_voltage_sensor
+                    below: !input grid_voltage_threshold
+
+                  # Turn off non-essential loads
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input load_shedding_switches
+
+                  - service: !input notification_service
+                    data:
+                      title: "🔌 Load Shedding Active"
+                      message: "Non-essential loads turned off to conserve battery."
+                      data:
+                        tag: "srne_load_shedding"
+
+      # Grid restored
+      - conditions:
+          - condition: trigger
+            id: "grid_restore"
+        sequence:
+          # Restore normal priority
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input normal_priority
+
+          # Restore loads if they were shed
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_load_shedding }}"
+                  - condition: template
+                    value_template: "{{ load_shedding_switches | length > 0 }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input load_shedding_switches
+
+          # Send notification
+          - service: !input notification_service
+            data:
+              title: "✅ Grid Power Restored"
+              message: >
+                Grid power returned at {{ timestamp }}
+
+                Status:
+                - Grid Voltage: {{ grid_voltage }}V
+                - Battery SOC: {{ battery_soc }}%
+                - Mode: Restored to {{ normal_priority }}
+                {% if enable_load_shedding %}
+                - All loads restored
+                {% endif %}
+              data:
+                tag: "srne_grid_failure"
+
+          # Log restoration
+          - service: system_log.write
+            data:
+              message: >
+                Grid power restored: {{ grid_voltage }}V, Battery: {{ battery_soc }}%
+              level: info
+              logger: homeassistant.components.srne_ble_modbus
+
+      # Low battery warning during grid failure
+      - conditions:
+          - condition: trigger
+            id: "low_battery_warning"
+          # Only warn if grid is still down
+          - condition: numeric_state
+            entity_id: !input grid_voltage_sensor
+            below: !input grid_voltage_threshold
+        sequence:
+          - service: !input notification_service
+            data:
+              title: "🔋 LOW BATTERY WARNING"
+              message: >
+                Battery at {{ battery_soc }}% during grid failure!
+                Grid voltage: {{ grid_voltage }}V
+
+                Consider reducing load or prepare for power loss.
+              data:
+                priority: high
+                tag: "srne_low_battery_grid_down"
+
+mode: restart

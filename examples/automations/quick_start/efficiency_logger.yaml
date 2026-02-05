@@ -1,0 +1,40 @@
+# Daily Efficiency Logger
+# Logs daily efficiency metrics and system performance
+#
+# Requirements:
+# - sensor.srne_inverter_pv_energy_today (Daily PV production)
+# - sensor.srne_inverter_load_energy_today (Daily load consumption)
+# - sensor.srne_inverter_battery_soc (Battery state of charge)
+#
+# Usage:
+# 1. Copy this file to your config/automations directory
+# 2. Adjust notification time (default: 11:59 PM)
+# 3. Optionally add database logging or file export
+
+automation:
+  - alias: "SRNE: Daily Efficiency Report"
+    description: "Log daily efficiency metrics before midnight"
+
+    trigger:
+      - platform: time
+        at: "23:59:00"
+
+    action:
+      - service: notify.notify
+        data:
+          title: "Daily Efficiency Report"
+          message: >
+            Date: {{ now().strftime('%Y-%m-%d') }}
+
+            Production:
+            - PV Energy: {{ states('sensor.srne_inverter_pv_energy_today') }} kWh
+
+            Consumption:
+            - Load Energy: {{ states('sensor.srne_inverter_load_energy_today') }} kWh
+            - Grid Import: {{ states('sensor.srne_inverter_grid_import_today') | default('N/A') }} kWh
+
+            Battery:
+            - End of Day SOC: {{ states('sensor.srne_inverter_battery_soc') }}%
+
+            Efficiency:
+            - Self-Sufficiency: {{ ((states('sensor.srne_inverter_pv_energy_today') | float / states('sensor.srne_inverter_load_energy_today') | float) * 100) | round(1) }}%

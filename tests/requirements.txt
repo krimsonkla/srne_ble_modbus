@@ -1,0 +1,22 @@
+# BLE Testing Requirements
+# Install with: pip install -r requirements.txt
+
+# BLE library (cross-platform)
+bleak>=0.21.0
+bleak-retry-connector>=3.4.0
+
+# Home Assistant (for testing components)
+homeassistant>=2024.11.0
+
+# Home Assistant dependencies
+pyserial>=3.5
+
+# Testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-timeout>=2.1.0
+pytest-homeassistant-custom-component>=0.13.0
+pytest-cov>=4.1.0
+
+# Mocking
+pytest-mock>=3.11.1

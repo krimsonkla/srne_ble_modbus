@@ -1,0 +1,272 @@
+blueprint:
+  name: "SRNE Inverter - Fault Response"
+  description: >
+    Automatically responds to inverter faults by sending notifications, switching to safe mode,
+    and optionally attempting automatic recovery through inverter restart.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/fault_response.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    fault_sensor:
+      name: Fault Detection Sensor
+      description: Binary sensor that indicates fault status
+      selector:
+        entity:
+          domain: binary_sensor
+
+    fault_code_sensor:
+      name: Fault Code Sensor (Optional)
+      description: Sensor showing the specific fault code
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    priority_select:
+      name: Priority Select Entity
+      description: Energy priority select entity
+      selector:
+        entity:
+          domain: select
+
+    safe_mode_priority:
+      name: Safe Mode Priority
+      description: Priority to switch to when fault occurs
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Utility First"
+            - "Solar First"
+
+    notification_service_1:
+      name: Primary Notification Service
+      description: First notification service for urgent alerts
+      selector:
+        text:
+
+    notification_service_2:
+      name: Secondary Notification Service (Optional)
+      description: Second notification service for redundancy
+      default: ""
+      selector:
+        text:
+
+    notification_service_3:
+      name: Third Notification Service (Optional)
+      description: Third notification service (e.g., email for critical alerts)
+      default: ""
+      selector:
+        text:
+
+    auto_restart_enabled:
+      name: Enable Auto-Restart
+      description: Automatically attempt to restart inverter on fault
+      default: false
+      selector:
+        boolean:
+
+    restart_delay:
+      name: Restart Delay
+      description: Wait time before attempting restart (seconds)
+      default: 60
+      selector:
+        number:
+          min: 30
+          max: 300
+          step: 30
+          unit_of_measurement: "s"
+
+    max_restart_attempts:
+      name: Maximum Restart Attempts
+      description: Maximum number of automatic restart attempts
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+
+    notification_repeat_interval:
+      name: Notification Repeat Interval
+      description: Re-send notification if fault persists (0 = no repeat)
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 5
+          unit_of_measurement: "minutes"
+
+trigger:
+  # Fault detected
+  - platform: state
+    entity_id: !input fault_sensor
+    to: "on"
+    id: "fault_on"
+
+  # Fault cleared
+  - platform: state
+    entity_id: !input fault_sensor
+    to: "off"
+    id: "fault_off"
+
+  # Repeat notification if fault persists
+  - platform: state
+    entity_id: !input fault_sensor
+    to: "on"
+    for:
+      minutes: !input notification_repeat_interval
+    id: "fault_persist"
+
+condition: []
+
+action:
+  - variables:
+      fault_code: >
+        {% if fault_code_sensor is defined and fault_code_sensor != none %}
+          {{ states(fault_code_sensor) }}
+        {% else %}
+          Unknown
+        {% endif %}
+      timestamp: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  - choose:
+      # Fault detected or persisting
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "fault_on"
+              - condition: trigger
+                id: "fault_persist"
+        sequence:
+          # Switch to safe mode
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input safe_mode_priority
+
+          # Send primary notification
+          - service: !input notification_service_1
+            data:
+              title: "🚨 INVERTER FAULT DETECTED"
+              message: >
+                Fault detected at {{ timestamp }}
+
+                Fault Code: {{ fault_code }}
+
+                Actions taken:
+                - Switched to {{ safe_mode_priority }}
+                {% if auto_restart_enabled %}
+                - Auto-restart will be attempted in {{ restart_delay }}s
+                {% else %}
+                - Manual intervention required
+                {% endif %}
+
+                Check inverter immediately!
+              data:
+                priority: high
+                ttl: 0
+                tag: "srne_fault"
+
+          # Send secondary notifications
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service_2 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_2
+                    data:
+                      title: "🚨 INVERTER FAULT"
+                      message: "Fault code {{ fault_code }} at {{ timestamp }}. Check Home Assistant."
+                      data:
+                        priority: high
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service_3 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_3
+                    data:
+                      title: "🚨 SRNE Inverter Fault Alert"
+                      message: >
+                        Critical fault detected on SRNE inverter.
+                        Fault Code: {{ fault_code }}
+                        Time: {{ timestamp }}
+                        System switched to safe mode ({{ safe_mode_priority }}).
+
+          # Log to system
+          - service: system_log.write
+            data:
+              message: >
+                SRNE Inverter Fault: Code {{ fault_code }} at {{ timestamp }}
+              level: error
+              logger: homeassistant.components.srne_ble_modbus
+
+          # Optional auto-restart
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ auto_restart_enabled }}"
+                  - condition: trigger
+                    id: "fault_on"
+                sequence:
+                  # Wait before restart
+                  - delay:
+                      seconds: !input restart_delay
+
+                  # Check if fault still exists
+                  - condition: state
+                    entity_id: !input fault_sensor
+                    state: "on"
+
+                  # Attempt restart
+                  - service: srne_ble_modbus.restart_inverter
+                    target:
+                      device_id: !input inverter_device
+
+                  - service: !input notification_service_1
+                    data:
+                      title: "🔄 Inverter Restart Attempted"
+                      message: "Automatic restart initiated for fault {{ fault_code }}"
+                      data:
+                        tag: "srne_fault_restart"
+
+      # Fault cleared
+      - conditions:
+          - condition: trigger
+            id: "fault_off"
+        sequence:
+          # Notify fault cleared
+          - service: !input notification_service_1
+            data:
+              title: "✅ Inverter Fault Cleared"
+              message: >
+                Fault cleared at {{ timestamp }}
+                Previous fault code: {{ fault_code }}
+
+                System operating normally.
+              data:
+                tag: "srne_fault"
+
+          # Log recovery
+          - service: system_log.write
+            data:
+              message: >
+                SRNE Inverter Fault Cleared: Previous code {{ fault_code }}
+              level: info
+              logger: homeassistant.components.srne_ble_modbus
+
+mode: queued
+max: 10

@@ -1,0 +1,33 @@
+# Simple High Load Alert
+# Notifies when AC output load exceeds threshold
+#
+# Requirements:
+# - sensor.srne_inverter_ac_output_load (AC output load sensor in watts)
+#
+# Usage:
+# 1. Copy this file to your config/automations directory
+# 2. Adjust threshold (2000W) to match your system capacity
+# 3. Modify the 'for' duration if you want to ignore brief spikes
+
+automation:
+  - alias: "SRNE: High Load Warning"
+    description: "Alert when load exceeds 2000W for 1 minute"
+
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.srne_inverter_ac_output_load
+        above: 2000
+        for:
+          minutes: 1
+
+    action:
+      - service: notify.notify
+        data:
+          title: "High Load Warning"
+          message: >
+            AC output load is {{ states('sensor.srne_inverter_ac_output_load') }}W.
+            Consider reducing load or switching to grid power.
+            Battery SOC: {{ states('sensor.srne_inverter_battery_soc') }}%
+          data:
+            priority: high
+            tag: "high_load"

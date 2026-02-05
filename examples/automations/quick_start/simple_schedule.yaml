@@ -1,0 +1,43 @@
+# Simple Time-Based Schedule
+# Turns inverter on at 6 AM and off at 10 PM daily
+#
+# Requirements:
+# - switch.srne_inverter_power (Inverter power switch)
+#
+# Usage:
+# 1. Copy this file to your config/automations directory
+# 2. Adjust times to match your schedule
+# 3. Verify switch entity ID matches your setup
+
+automation:
+  - alias: "SRNE: Morning Startup"
+    description: "Turn on inverter at 6 AM"
+
+    trigger:
+      - platform: time
+        at: "06:00:00"
+
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.srne_inverter_power
+
+      - service: notify.notify
+        data:
+          message: "SRNE inverter turned on for the day"
+
+  - alias: "SRNE: Night Shutdown"
+    description: "Turn off inverter at 10 PM"
+
+    trigger:
+      - platform: time
+        at: "22:00:00"
+
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.srne_inverter_power
+
+      - service: notify.notify
+        data:
+          message: "SRNE inverter turned off for the night"

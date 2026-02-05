@@ -1,0 +1,609 @@
+blueprint:
+  name: "SRNE Inverter - Generator Auto-Start"
+  description: >
+    Intelligent generator management system that automatically starts a backup generator when
+    battery SOC is critically low and grid power is unavailable. Manages generator runtime,
+    battery charging from generator, and automatic shutdown when battery is sufficiently charged.
+    Includes safety interlocks and flexible start/stop conditions.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/1_safety/generator_auto_start.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    grid_status_sensor:
+      name: Grid Status Sensor
+      description: Binary sensor indicating grid availability (on = grid available)
+      selector:
+        entity:
+          domain: binary_sensor
+
+    generator_start_relay:
+      name: Generator Start Relay
+      description: Switch to activate generator start relay
+      selector:
+        entity:
+          domain: switch
+
+    generator_run_sensor:
+      name: Generator Running Sensor (Optional)
+      description: Binary sensor confirming generator is running
+      default: {}
+      selector:
+        entity:
+          domain: binary_sensor
+
+    priority_select:
+      name: Energy Priority Select
+      description: Energy priority select entity
+      selector:
+        entity:
+          domain: select
+
+    charge_current_number:
+      name: Charge Current Control (Optional)
+      description: Number entity to control charge current from generator
+      default: {}
+      selector:
+        entity:
+          domain: number
+
+    # Start conditions
+    start_soc_threshold:
+      name: Generator Start SOC
+      description: Start generator when battery drops below this level (%)
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 5
+          unit_of_measurement: "%"
+
+    start_hysteresis:
+      name: Start Condition Duration
+      description: Battery must be low for this duration before starting (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: "minutes"
+
+    grid_outage_required:
+      name: Require Grid Outage
+      description: Only start generator if grid is unavailable
+      default: true
+      selector:
+        boolean:
+
+    # Stop conditions
+    stop_soc_threshold:
+      name: Generator Stop SOC
+      description: Stop generator when battery charges above this level (%)
+      default: 80
+      selector:
+        number:
+          min: 50
+          max: 95
+          step: 5
+          unit_of_measurement: "%"
+
+    min_runtime:
+      name: Minimum Runtime
+      description: Keep generator running for at least this duration (minutes)
+      default: 30
+      selector:
+        number:
+          min: 15
+          max: 120
+          step: 5
+          unit_of_measurement: "minutes"
+
+    max_runtime:
+      name: Maximum Runtime
+      description: Maximum generator runtime per cycle (hours)
+      default: 4
+      selector:
+        number:
+          min: 1
+          max: 12
+          step: 0.5
+          unit_of_measurement: "hours"
+
+    stop_on_grid_restore:
+      name: Stop on Grid Restore
+      description: Stop generator when grid power is restored
+      default: true
+      selector:
+        boolean:
+
+    grid_restore_delay:
+      name: Grid Restore Delay
+      description: Wait time after grid restore before stopping generator (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: "minutes"
+
+    # Generator charging settings
+    generator_charge_priority:
+      name: Generator Charging Priority
+      description: Priority mode when charging from generator
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Utility First"
+            - "Solar First"
+
+    generator_charge_current:
+      name: Generator Charge Current
+      description: Charge current limit when running on generator (amps)
+      default: 60
+      selector:
+        number:
+          min: 10
+          max: 120
+          step: 5
+          unit_of_measurement: "A"
+
+    # Start relay control
+    start_pulse_duration:
+      name: Start Pulse Duration
+      description: Duration to activate start relay (seconds)
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          unit_of_measurement: "s"
+
+    start_attempts:
+      name: Maximum Start Attempts
+      description: Number of start attempts before giving up
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 5
+          step: 1
+
+    start_attempt_delay:
+      name: Start Attempt Delay
+      description: Wait time between start attempts (seconds)
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 5
+          unit_of_measurement: "s"
+
+    # Safety features
+    enable_time_restrictions:
+      name: Enable Time Restrictions
+      description: Restrict generator operation to specific hours
+      default: false
+      selector:
+        boolean:
+
+    allowed_start_time:
+      name: Allowed Start Time
+      description: Earliest time to allow generator start (for time restrictions)
+      default: "06:00:00"
+      selector:
+        time:
+
+    allowed_end_time:
+      name: Allowed End Time
+      description: Latest time to allow generator start (for time restrictions)
+      default: "22:00:00"
+      selector:
+        time:
+
+    enable_manual_override:
+      name: Enable Manual Override
+      description: Allow manual generator control via input boolean
+      default: false
+      selector:
+        boolean:
+
+    manual_override_boolean:
+      name: Manual Override Boolean (Optional)
+      description: Input boolean to manually enable/disable auto-start
+      default: {}
+      selector:
+        entity:
+          domain: input_boolean
+
+    # Notifications
+    notification_service_1:
+      name: Primary Notification Service
+      description: Critical notification service
+      selector:
+        text:
+
+    notification_service_2:
+      name: Secondary Notification Service (Optional)
+      description: Secondary notification service for redundancy
+      default: ""
+      selector:
+        text:
+
+    notify_on_start:
+      name: Notify on Start
+      description: Send notification when generator starts
+      default: true
+      selector:
+        boolean:
+
+    notify_on_stop:
+      name: Notify on Stop
+      description: Send notification when generator stops
+      default: true
+      selector:
+        boolean:
+
+    notify_on_failure:
+      name: Notify on Start Failure
+      description: Send notification if generator fails to start
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # Low battery trigger
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input start_soc_threshold
+    for:
+      minutes: !input start_hysteresis
+    id: "battery_low"
+
+  # Battery charged trigger
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    above: !input stop_soc_threshold
+    id: "battery_charged"
+
+  # Grid status changes
+  - platform: state
+    entity_id: !input grid_status_sensor
+    to: "off"
+    id: "grid_lost"
+
+  - platform: state
+    entity_id: !input grid_status_sensor
+    to: "on"
+    for:
+      minutes: !input grid_restore_delay
+    id: "grid_restored"
+
+  # Manual override trigger
+  - platform: state
+    entity_id: !input manual_override_boolean
+    id: "manual_control"
+
+  # Periodic monitoring
+  - platform: time_pattern
+    minutes: "/5"
+    id: "periodic_check"
+
+condition: []
+
+action:
+  - variables:
+      battery_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      grid_available: "{{ states(grid_status_sensor) == 'on' }}"
+      start_soc: !input start_soc_threshold
+      stop_soc: !input stop_soc_threshold
+      require_grid_out: !input grid_outage_required
+      stop_on_grid: !input stop_on_grid_restore
+      enable_time_restrict: !input enable_time_restrictions
+      enable_override: !input enable_manual_override
+      generator_running: >
+        {% if generator_run_sensor is defined and generator_run_sensor != none %}
+          {{ states(generator_run_sensor) == 'on' }}
+        {% else %}
+          {{ states(generator_start_relay) == 'on' }}
+        {% endif %}
+
+  # Check time restrictions
+  - variables:
+      time_allowed: >
+        {% if enable_time_restrict %}
+          {% set ct = now().time() %}
+          {% set start = strptime(allowed_start_time, '%H:%M:%S').time() %}
+          {% set end = strptime(allowed_end_time, '%H:%M:%S').time() %}
+          {{ ct >= start and ct < end }}
+        {% else %}
+          true
+        {% endif %}
+
+  # Check manual override
+  - variables:
+      override_disabled: >
+        {% if enable_override and manual_override_boolean is defined and manual_override_boolean != none %}
+          {{ states(manual_override_boolean) == 'off' }}
+        {% else %}
+          false
+        {% endif %}
+
+  # Determine if generator should be running
+  - variables:
+      should_start: >
+        {{ battery_soc < start_soc and
+           (not require_grid_out or not grid_available) and
+           time_allowed and
+           not override_disabled and
+           not generator_running }}
+
+      should_stop: >
+        {{ generator_running and
+           (battery_soc >= stop_soc or
+            (stop_on_grid and grid_available)) }}
+
+  # Execute start/stop logic
+  - choose:
+      # START GENERATOR
+      - conditions:
+          - condition: template
+            value_template: "{{ should_start }}"
+        sequence:
+          - service: system_log.write
+            data:
+              message: >
+                Generator Auto-Start: Initiating start sequence
+                Battery SOC: {{ battery_soc }}%, Grid: {{ 'Available' if grid_available else 'Unavailable' }}
+              level: warning
+              logger: homeassistant.components.srne_ble_modbus.generator
+
+          # Notification before start
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_start and notification_service_1 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_1
+                    data:
+                      title: "🔥 Generator Starting"
+                      message: >
+                        Backup generator starting
+
+                        Battery SOC: {{ battery_soc }}%
+                        Grid Status: {{ 'Unavailable' if not grid_available else 'Available' }}
+                        Reason: {{ 'Critical battery level' if battery_soc < start_soc else 'Manual trigger' }}
+                      data:
+                        tag: "srne_generator"
+                        priority: high
+
+          # Attempt to start generator
+          - repeat:
+              count: !input start_attempts
+              sequence:
+                - service: switch.turn_on
+                  target:
+                    entity_id: !input generator_start_relay
+
+                - delay:
+                    seconds: !input start_pulse_duration
+
+                - service: switch.turn_off
+                  target:
+                    entity_id: !input generator_start_relay
+
+                - delay:
+                    seconds: !input start_attempt_delay
+
+                # Check if generator started
+                - choose:
+                    - conditions:
+                        - condition: template
+                          value_template: >
+                            {% if generator_run_sensor is defined and generator_run_sensor != none %}
+                              {{ states(generator_run_sensor) == 'on' }}
+                            {% else %}
+                              true
+                            {% endif %}
+                      sequence:
+                        - service: system_log.write
+                          data:
+                            message: "Generator started successfully"
+                            level: info
+                            logger: homeassistant.components.srne_ble_modbus.generator
+                        - stop: "Generator started"
+
+          # Configure charging from generator
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input generator_charge_priority
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ charge_current_number is defined and charge_current_number != none }}"
+                sequence:
+                  - service: number.set_value
+                    target:
+                      entity_id: !input charge_current_number
+                    data:
+                      value: !input generator_charge_current
+
+          # Check if start was successful
+          - delay:
+              seconds: 10
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {% if generator_run_sensor is defined and generator_run_sensor != none %}
+                        {{ states(generator_run_sensor) == 'off' }}
+                      {% else %}
+                        false
+                      {% endif %}
+                sequence:
+                  # Start failed
+                  - service: system_log.write
+                    data:
+                      message: "Generator failed to start after all attempts"
+                      level: error
+                      logger: homeassistant.components.srne_ble_modbus.generator
+
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ notify_on_failure and notification_service_1 | length > 0 }}"
+                        sequence:
+                          - service: !input notification_service_1
+                            data:
+                              title: "🚨 Generator Start Failed"
+                              message: >
+                                Generator failed to start after {{ start_attempts }} attempts!
+
+                                Battery SOC: {{ battery_soc }}%
+                                Grid: {{ 'Unavailable' if not grid_available else 'Available' }}
+
+                                ⚠️ Manual intervention required!
+                              data:
+                                priority: high
+                                ttl: 0
+
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: "{{ notification_service_2 | length > 0 }}"
+                                sequence:
+                                  - service: !input notification_service_2
+                                    data:
+                                      title: "Generator Failure"
+                                      message: "Generator start failed - critical battery level!"
+
+      # STOP GENERATOR
+      - conditions:
+          - condition: template
+            value_template: "{{ should_stop }}"
+        sequence:
+          # Check minimum runtime
+          - variables:
+              start_time_attr: "{{ state_attr(generator_start_relay, 'last_changed') }}"
+              runtime_minutes: >
+                {% if start_time_attr %}
+                  {{ ((as_timestamp(now()) - as_timestamp(start_time_attr)) / 60) | round(0) }}
+                {% else %}
+                  999
+                {% endif %}
+              min_runtime: !input min_runtime
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ runtime_minutes < min_runtime }}"
+                sequence:
+                  - service: system_log.write
+                    data:
+                      message: >
+                        Generator stop delayed: Minimum runtime not met
+                        ({{ runtime_minutes }} < {{ min_runtime }} minutes)
+                      level: info
+                      logger: homeassistant.components.srne_ble_modbus.generator
+                  - stop: "Minimum runtime not met"
+
+          # Stop generator
+          - service: switch.turn_off
+            target:
+              entity_id: !input generator_start_relay
+
+          - service: system_log.write
+            data:
+              message: >
+                Generator stopped: Battery charged to {{ battery_soc }}%
+                Runtime: {{ runtime_minutes }} minutes
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.generator
+
+          # Notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_stop and notification_service_1 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_1
+                    data:
+                      title: "✅ Generator Stopped"
+                      message: >
+                        Backup generator stopped
+
+                        Battery SOC: {{ battery_soc }}%
+                        Runtime: {{ runtime_minutes }} minutes
+                        Grid: {{ 'Restored' if grid_available else 'Still unavailable' }}
+                      data:
+                        tag: "srne_generator"
+
+      # MAX RUNTIME CHECK
+      - conditions:
+          - condition: template
+            value_template: "{{ generator_running }}"
+        sequence:
+          - variables:
+              start_time_attr: "{{ state_attr(generator_start_relay, 'last_changed') }}"
+              runtime_hours: >
+                {% if start_time_attr %}
+                  {{ ((as_timestamp(now()) - as_timestamp(start_time_attr)) / 3600) | round(1) }}
+                {% else %}
+                  0
+                {% endif %}
+              max_runtime_hours: !input max_runtime
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ runtime_hours >= max_runtime_hours }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input generator_start_relay
+
+                  - service: system_log.write
+                    data:
+                      message: >
+                        Generator stopped: Maximum runtime exceeded ({{ runtime_hours }} hours)
+                      level: warning
+                      logger: homeassistant.components.srne_ble_modbus.generator
+
+                  - service: !input notification_service_1
+                    data:
+                      title: "⚠️ Generator Max Runtime"
+                      message: >
+                        Generator stopped after {{ runtime_hours }} hours
+
+                        Battery SOC: {{ battery_soc }}%
+
+                        Check fuel and battery charging system.
+                      data:
+                        priority: high
+
+mode: queued
+max: 3

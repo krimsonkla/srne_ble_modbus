@@ -1,0 +1,37 @@
+"""Select platform for SRNE Inverter integration."""
+
+from __future__ import annotations
+
+import logging
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from .const import DOMAIN
+from .coordinator import SRNEDataUpdateCoordinator
+from .entity_factory import EntityFactory
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up SRNE Inverter select from a config entry."""
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator: SRNEDataUpdateCoordinator = data["coordinator"]
+    config = data["config"]
+
+    # Load configurable entities from config
+    try:
+        entities = EntityFactory.create_entities_from_config(
+            coordinator, entry, config, "selects"
+        )
+        async_add_entities(entities, True)
+        _LOGGER.info("Loaded %d select entities from configuration", len(entities))
+    except Exception as err:
+        _LOGGER.error("Failed to load select entities: %s", err, exc_info=True)
+        raise

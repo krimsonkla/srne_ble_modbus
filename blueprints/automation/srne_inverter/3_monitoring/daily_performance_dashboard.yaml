@@ -1,0 +1,719 @@
+blueprint:
+  name: "SRNE Inverter - Daily Performance Dashboard"
+  description: >
+    Advanced daily performance report with comprehensive KPI calculations including
+    self-sufficiency percentage, grid dependency, system efficiency, battery cycles,
+    and cost savings. Ideal for power users tracking detailed energy metrics.
+
+
+    Features:
+    - Comprehensive energy flow analysis
+    - Multiple calculation methods (simple, weighted, normalized)
+    - Cost savings estimation with configurable rates
+    - Battery health tracking and cycle counting
+    - System efficiency metrics
+    - Flexible notification styles (detailed, summary, compact, metrics-only)
+    - Historical comparison (vs yesterday, vs 7-day average)
+    - Customizable report scheduling
+
+
+    Requirements:
+    - SRNE Inverter integration sensors
+    - Optional: Weather integration for context
+    - Optional: Utility meter helpers for accurate cost tracking
+
+  domain: automation
+  author: "SRNE Inverter Integration - Advanced"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/3_monitoring/daily_performance_dashboard.yaml
+
+  input:
+    # Device Selection
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    # Energy Sensors (Required)
+    pv_energy_today_sensor:
+      name: PV Energy Today Sensor
+      description: Solar energy produced today (kWh)
+      selector:
+        entity:
+          domain: sensor
+          device_class: energy
+
+    battery_charge_today_sensor:
+      name: Battery Charge Today Sensor
+      description: Energy charged to battery today (kWh)
+      selector:
+        entity:
+          domain: sensor
+          device_class: energy
+
+    battery_discharge_today_sensor:
+      name: Battery Discharge Today Sensor
+      description: Energy discharged from battery today (kWh)
+      selector:
+        entity:
+          domain: sensor
+          device_class: energy
+
+    grid_import_today_sensor:
+      name: Grid Import Today Sensor
+      description: Energy imported from grid today (kWh)
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: energy
+
+    grid_export_today_sensor:
+      name: Grid Export Today Sensor (Optional)
+      description: Energy exported to grid today (kWh)
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: energy
+
+    load_consumption_today_sensor:
+      name: Load Consumption Today Sensor
+      description: Total load consumption today (kWh). If not provided, will be calculated.
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: energy
+
+    # Battery Sensors
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Current battery state of charge (%)
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    battery_voltage_sensor:
+      name: Battery Voltage Sensor (Optional)
+      description: Current battery voltage for health analysis
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: voltage
+
+    battery_temperature_sensor:
+      name: Battery Temperature Sensor (Optional)
+      description: Battery temperature for health monitoring
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    battery_cycles_sensor:
+      name: Battery Cycles Sensor (Optional)
+      description: Total battery cycle count
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    # Historical Comparison
+    pv_energy_yesterday_sensor:
+      name: PV Energy Yesterday Sensor (Optional)
+      description: For comparison metrics
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    pv_energy_7day_avg_sensor:
+      name: PV 7-Day Average Sensor (Optional)
+      description: For trend analysis
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    # Cost Configuration
+    electricity_buy_rate:
+      name: Electricity Buy Rate
+      description: Cost per kWh for imported electricity (in your currency)
+      default: 0.12
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.01
+          unit_of_measurement: "currency/kWh"
+          mode: box
+
+    electricity_sell_rate:
+      name: Electricity Sell Rate (Optional)
+      description: Revenue per kWh for exported electricity. Set to 0 if no feed-in.
+      default: 0.08
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.01
+          unit_of_measurement: "currency/kWh"
+          mode: box
+
+    currency_symbol:
+      name: Currency Symbol
+      description: Symbol to display for cost calculations
+      default: "$"
+      selector:
+        text:
+
+    # Calculation Methods
+    calculation_method:
+      name: Calculation Method
+      description: |
+        Method for calculating self-sufficiency and efficiency:
+        - Simple: Basic ratio calculations
+        - Weighted: Accounts for battery efficiency losses
+        - Normalized: Adjusts for export and peak hours
+        - Conservative: Uses pessimistic estimates
+      default: "weighted"
+      selector:
+        select:
+          options:
+            - label: "Simple (Basic Ratio)"
+              value: "simple"
+            - label: "Weighted (With Efficiency)"
+              value: "weighted"
+            - label: "Normalized (Export Adjusted)"
+              value: "normalized"
+            - label: "Conservative (Pessimistic)"
+              value: "conservative"
+
+    battery_efficiency_factor:
+      name: Battery Efficiency Factor
+      description: Round-trip battery efficiency (0.85-0.95). Used in weighted calculations.
+      default: 0.90
+      selector:
+        number:
+          min: 0.70
+          max: 0.99
+          step: 0.01
+          mode: slider
+
+    inverter_efficiency_factor:
+      name: Inverter Efficiency Factor
+      description: Inverter conversion efficiency (0.90-0.98)
+      default: 0.95
+      selector:
+        number:
+          min: 0.80
+          max: 0.99
+          step: 0.01
+          mode: slider
+
+    # Report Configuration
+    report_time:
+      name: Report Time
+      description: When to generate and send the daily report
+      default: "23:00:00"
+      selector:
+        time:
+
+    notification_style:
+      name: Notification Style
+      description: Choose the report format and detail level
+      default: "detailed"
+      selector:
+        select:
+          options:
+            - label: "Detailed (Full Analysis)"
+              value: "detailed"
+            - label: "Summary (Key Metrics)"
+              value: "summary"
+            - label: "Compact (One-Liner)"
+              value: "compact"
+            - label: "Metrics Only (Numbers)"
+              value: "metrics"
+            - label: "Visual (Charts & Gauges)"
+              value: "visual"
+
+    include_comparisons:
+      name: Include Historical Comparisons
+      description: Show comparisons with yesterday and 7-day average
+      default: true
+      selector:
+        boolean:
+
+    include_battery_health:
+      name: Include Battery Health Analysis
+      description: Add detailed battery health metrics and recommendations
+      default: true
+      selector:
+        boolean:
+
+    include_cost_analysis:
+      name: Include Cost Analysis
+      description: Calculate and display cost savings and grid costs
+      default: true
+      selector:
+        boolean:
+
+    include_recommendations:
+      name: Include AI Recommendations
+      description: Generate optimization suggestions based on performance
+      default: true
+      selector:
+        boolean:
+
+    # Notification Services
+    notification_service:
+      name: Notification Service
+      description: Primary notification service (e.g., notify.mobile_app_phone)
+      selector:
+        text:
+
+    secondary_notification_service:
+      name: Secondary Notification Service (Optional)
+      description: Additional notification target (e.g., notify.telegram)
+      default: ""
+      selector:
+        text:
+
+    create_persistent_notification:
+      name: Create Persistent Notification
+      description: Also create a persistent notification in Home Assistant UI
+      default: true
+      selector:
+        boolean:
+
+    # Thresholds and Alerts
+    low_self_sufficiency_threshold:
+      name: Low Self-Sufficiency Alert Threshold
+      description: Alert if self-sufficiency drops below this percentage
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    high_grid_dependency_threshold:
+      name: High Grid Dependency Alert Threshold
+      description: Alert if grid dependency exceeds this percentage
+      default: 60
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    battery_cycle_warning_threshold:
+      name: Battery Cycle Warning Threshold
+      description: Warn when approaching this cycle count (0 to disable)
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 100
+          mode: box
+
+trigger:
+  - platform: time
+    at: !input report_time
+
+condition: []
+
+variables:
+  # Input assignments
+  calc_method: !input calculation_method
+  batt_eff: !input battery_efficiency_factor
+  inv_eff: !input inverter_efficiency_factor
+  buy_rate: !input electricity_buy_rate
+  sell_rate: !input electricity_sell_rate
+  curr_symbol: !input currency_symbol
+  notif_style: !input notification_style
+
+  # Energy values
+  pv_today: "{{ states(pv_energy_today_sensor) | float(0) }}"
+  batt_charge: "{{ states(battery_charge_today_sensor) | float(0) }}"
+  batt_discharge: "{{ states(battery_discharge_today_sensor) | float(0) }}"
+  grid_import: "{{ states(grid_import_today_sensor) | float(0) if grid_import_today_sensor not in ['', 'unknown', 'unavailable', none] else 0 }}"
+  grid_export: "{{ states(grid_export_today_sensor) | float(0) if grid_export_today_sensor not in ['', 'unknown', 'unavailable', none] else 0 }}"
+
+  # Load calculation
+  load_total: >
+    {% if load_consumption_today_sensor not in ['', 'unknown', 'unavailable', none] %}
+      {{ states(load_consumption_today_sensor) | float(0) }}
+    {% else %}
+      {{ (pv_today + batt_discharge + grid_import - grid_export) | round(2) }}
+    {% endif %}
+
+  # Battery metrics
+  batt_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+  batt_voltage: "{{ states(battery_voltage_sensor) | float(0) if battery_voltage_sensor not in ['', 'unknown', 'unavailable', none] else 0 }}"
+  batt_temp: "{{ states(battery_temperature_sensor) | float(0) if battery_temperature_sensor not in ['', 'unknown', 'unavailable', none] else 0 }}"
+  batt_cycles: "{{ states(battery_cycles_sensor) | int(0) if battery_cycles_sensor not in ['', 'unknown', 'unavailable', none] else 0 }}"
+
+  # Historical data
+  pv_yesterday: "{{ states(pv_energy_yesterday_sensor) | float(0) if pv_energy_yesterday_sensor not in ['', 'unknown', 'unavailable', none] else 0 }}"
+  pv_7day_avg: "{{ states(pv_energy_7day_avg_sensor) | float(0) if pv_energy_7day_avg_sensor not in ['', 'unknown', 'unavailable', none] else 0 }}"
+
+  # KPI Calculations
+
+  # Self-Sufficiency Percentage
+  self_sufficiency: >
+    {% set load = load_total | float %}
+    {% set method = calc_method %}
+    {% if load > 0 %}
+      {% if method == 'simple' %}
+        {{ (((pv_today + batt_discharge) / load) * 100) | round(1) }}
+      {% elif method == 'weighted' %}
+        {% set effective_pv = pv_today * inv_eff %}
+        {% set effective_batt = batt_discharge * batt_eff %}
+        {{ (((effective_pv + effective_batt) / load) * 100) | round(1) }}
+      {% elif method == 'normalized' %}
+        {% set net_load = load - grid_export %}
+        {% set self_gen = pv_today + batt_discharge %}
+        {{ ((self_gen / net_load) * 100) | round(1) if net_load > 0 else 100 }}
+      {% elif method == 'conservative' %}
+        {% set self_gen = (pv_today + batt_discharge) * 0.90 %}
+        {{ ((self_gen / load) * 100) | round(1) }}
+      {% else %}
+        {{ (((pv_today + batt_discharge) / load) * 100) | round(1) }}
+      {% endif %}
+    {% else %}
+      0
+    {% endif %}
+
+  # Grid Dependency Percentage
+  grid_dependency: >
+    {% set load = load_total | float %}
+    {% if load > 0 %}
+      {{ ((grid_import / load) * 100) | round(1) }}
+    {% else %}
+      0
+    {% endif %}
+
+  # System Efficiency (overall energy conversion efficiency)
+  system_efficiency: >
+    {% set total_input = pv_today + grid_import %}
+    {% set useful_output = load_total - (batt_charge - batt_discharge) %}
+    {% if total_input > 0 %}
+      {{ ((useful_output / total_input) * 100) | round(1) }}
+    {% else %}
+      0
+    {% endif %}
+
+  # Battery efficiency today
+  battery_efficiency: >
+    {% if batt_charge > 0.01 %}
+      {{ ((batt_discharge / batt_charge) * 100) | round(1) }}
+    {% else %}
+      0
+    {% endif %}
+
+  # Battery cycles increment today
+  battery_cycles_today: >
+    {% if batt_discharge > 0 %}
+      {{ (batt_discharge / 10.0) | round(2) }}
+    {% else %}
+      0
+    {% endif %}
+
+  # Cost Savings
+  grid_cost: "{{ (grid_import * buy_rate) | round(2) }}"
+  export_revenue: "{{ (grid_export * sell_rate) | round(2) }}"
+  solar_value: "{{ ((pv_today - grid_export) * buy_rate) | round(2) }}"
+  battery_value: "{{ (batt_discharge * buy_rate) | round(2) }}"
+
+  total_savings: >
+    {{ ((solar_value | float) + (battery_value | float) + (export_revenue | float) - (grid_cost | float)) | round(2) }}
+
+  net_cost: >
+    {{ ((grid_cost | float) - (export_revenue | float)) | round(2) }}
+
+  # Performance indicators
+  solar_utilization: >
+    {% if pv_today > 0 %}
+      {{ (((pv_today - grid_export) / pv_today) * 100) | round(1) }}
+    {% else %}
+      0
+    {% endif %}
+
+  # Comparisons
+  pv_vs_yesterday: >
+    {% if pv_yesterday > 0 %}
+      {{ (((pv_today - pv_yesterday) / pv_yesterday) * 100) | round(1) }}
+    {% else %}
+      0
+    {% endif %}
+
+  pv_vs_7day: >
+    {% if pv_7day_avg > 0 %}
+      {{ (((pv_today - pv_7day_avg) / pv_7day_avg) * 100) | round(1) }}
+    {% else %}
+      0
+    {% endif %}
+
+  # Health indicators
+  battery_health_score: >
+    {% set score = 100 %}
+    {% if battery_efficiency < 85 %}
+      {% set score = score - 20 %}
+    {% endif %}
+    {% if batt_temp > 35 %}
+      {% set score = score - 10 %}
+    {% endif %}
+    {% if batt_temp < 5 %}
+      {% set score = score - 15 %}
+    {% endif %}
+    {% if batt_cycles > 2000 %}
+      {% set score = score - 15 %}
+    {% endif %}
+    {{ score }}
+
+  # Alert flags
+  alert_low_sufficiency: "{{ self_sufficiency | float < low_self_sufficiency_threshold | float }}"
+  alert_high_grid_dep: "{{ grid_dependency | float > high_grid_dependency_threshold | float }}"
+  alert_battery_cycles: "{{ batt_cycles > battery_cycle_warning_threshold and battery_cycle_warning_threshold > 0 }}"
+
+action:
+  # Generate report based on notification style
+  - choose:
+      # DETAILED FORMAT
+      - conditions:
+          - condition: template
+            value_template: "{{ notif_style == 'detailed' }}"
+        sequence:
+          - variables:
+              report_title: "Daily Performance Dashboard"
+              report_message: >
+                📊 DAILY PERFORMANCE DASHBOARD
+                {{ now().strftime('%A, %B %d, %Y') }}
+
+                ═══════════════════════════════
+
+                ☀️ SOLAR PRODUCTION
+                  • Today: {{ pv_today }} kWh
+                  {% if include_comparisons %}
+                  • vs Yesterday: {{ '+' if pv_vs_yesterday >= 0 else '' }}{{ pv_vs_yesterday }}%
+                  {% if pv_7day_avg > 0 %}
+                  • vs 7-day avg: {{ '+' if pv_vs_7day >= 0 else '' }}{{ pv_vs_7day }}%
+                  {% endif %}
+                  {% endif %}
+                  • Utilization: {{ solar_utilization }}%
+
+                🔋 BATTERY PERFORMANCE
+                  • Charged: {{ batt_charge }} kWh
+                  • Discharged: {{ batt_discharge }} kWh
+                  • Current SOC: {{ batt_soc }}%
+                  • Round-trip Eff: {{ battery_efficiency }}%
+                  {% if include_battery_health %}
+                  • Cycles Today: {{ battery_cycles_today }}
+                  {% if batt_cycles > 0 %}
+                  • Total Cycles: {{ batt_cycles }}
+                  {% endif %}
+                  {% if batt_temp > 0 %}
+                  • Temperature: {{ batt_temp }}°C
+                  {% endif %}
+                  • Health Score: {{ battery_health_score }}/100
+                  {% endif %}
+
+                ⚡ CONSUMPTION & GRID
+                  • Total Load: {{ load_total }} kWh
+                  • From Grid: {{ grid_import }} kWh
+                  {% if grid_export > 0 %}
+                  • To Grid: {{ grid_export }} kWh
+                  {% endif %}
+                  • From Solar/Batt: {{ (pv_today + batt_discharge - grid_export) | round(2) }} kWh
+
+                📈 KEY PERFORMANCE INDICATORS
+                  • Self-Sufficiency: {{ self_sufficiency }}%
+                  • Grid Dependency: {{ grid_dependency }}%
+                  • System Efficiency: {{ system_efficiency }}%
+
+                {% if include_cost_analysis %}
+                💰 COST ANALYSIS
+                  • Grid Cost: {{ curr_symbol }}{{ grid_cost }}
+                  {% if grid_export > 0 %}
+                  • Export Revenue: {{ curr_symbol }}{{ export_revenue }}
+                  • Net Cost: {{ curr_symbol }}{{ net_cost }}
+                  {% endif %}
+                  • Solar Value: {{ curr_symbol }}{{ solar_value }}
+                  • Battery Value: {{ curr_symbol }}{{ battery_value }}
+                  • Total Savings: {{ curr_symbol }}{{ total_savings }}
+                {% endif %}
+
+                {% if include_recommendations %}
+                💡 RECOMMENDATIONS
+                {% if alert_low_sufficiency %}
+                  ⚠️ Low self-sufficiency detected. Consider:
+                     - Shifting loads to peak solar hours
+                     - Adjusting battery charge/discharge schedule
+                {% endif %}
+                {% if alert_high_grid_dep %}
+                  ⚠️ High grid dependency. Optimize:
+                     - Battery utilization during peak hours
+                     - Load scheduling
+                {% endif %}
+                {% if battery_health_score < 80 %}
+                  ⚠️ Battery health declining. Check:
+                     - Temperature conditions
+                     - Charge/discharge rates
+                     - Maintenance requirements
+                {% endif %}
+                {% if alert_battery_cycles %}
+                  ⚠️ Battery cycles approaching threshold ({{ batt_cycles }})
+                     - Plan for battery assessment
+                {% endif %}
+                {% if not (alert_low_sufficiency or alert_high_grid_dep or battery_health_score < 80 or alert_battery_cycles) %}
+                  ✅ System operating optimally
+                  ✅ All metrics within normal ranges
+                {% endif %}
+                {% endif %}
+
+                ═══════════════════════════════
+                Method: {{ calc_method | title }}
+                Generated: {{ now().strftime('%H:%M:%S') }}
+
+      # SUMMARY FORMAT
+      - conditions:
+          - condition: template
+            value_template: "{{ notif_style == 'summary' }}"
+        sequence:
+          - variables:
+              report_title: "Daily Summary"
+              report_message: >
+                📊 DAILY SUMMARY - {{ now().strftime('%m/%d/%Y') }}
+
+                ☀️ Solar: {{ pv_today }} kWh
+                🔋 Battery: {{ batt_soc }}% (↑{{ batt_charge }} ↓{{ batt_discharge }})
+                ⚡ Load: {{ load_total }} kWh (Grid: {{ grid_import }})
+
+                📈 Self-Sufficiency: {{ self_sufficiency }}%
+                📉 Grid Dependency: {{ grid_dependency }}%
+                ⚙️ System Efficiency: {{ system_efficiency }}%
+
+                {% if include_cost_analysis %}
+                💰 Net Cost: {{ curr_symbol }}{{ net_cost }}
+                💵 Savings: {{ curr_symbol }}{{ total_savings }}
+                {% endif %}
+
+                {% if alert_low_sufficiency or alert_high_grid_dep %}
+                ⚠️ Alerts: {% if alert_low_sufficiency %}Low Self-Suff {% endif %}{% if alert_high_grid_dep %}High Grid Dep{% endif %}
+                {% endif %}
+
+      # COMPACT FORMAT
+      - conditions:
+          - condition: template
+            value_template: "{{ notif_style == 'compact' }}"
+        sequence:
+          - variables:
+              report_title: "Daily Report"
+              report_message: >
+                📊 {{ now().strftime('%m/%d') }} | ☀️{{ pv_today }}kWh | 🔋{{ batt_soc }}% | ⚡{{ load_total }}kWh | 📈{{ self_sufficiency }}% | 💰{{ curr_symbol }}{{ total_savings }}
+
+      # METRICS ONLY FORMAT
+      - conditions:
+          - condition: template
+            value_template: "{{ notif_style == 'metrics' }}"
+        sequence:
+          - variables:
+              report_title: "Daily Metrics"
+              report_message: >
+                DAILY METRICS {{ now().strftime('%Y-%m-%d') }}
+
+                PV: {{ pv_today }} kWh
+                Battery Charge: {{ batt_charge }} kWh
+                Battery Discharge: {{ batt_discharge }} kWh
+                Battery SOC: {{ batt_soc }}%
+                Grid Import: {{ grid_import }} kWh
+                Grid Export: {{ grid_export }} kWh
+                Load: {{ load_total }} kWh
+
+                Self-Sufficiency: {{ self_sufficiency }}%
+                Grid Dependency: {{ grid_dependency }}%
+                System Efficiency: {{ system_efficiency }}%
+                Battery Efficiency: {{ battery_efficiency }}%
+
+                Grid Cost: {{ curr_symbol }}{{ grid_cost }}
+                Export Revenue: {{ curr_symbol }}{{ export_revenue }}
+                Net Cost: {{ curr_symbol }}{{ net_cost }}
+                Total Savings: {{ curr_symbol }}{{ total_savings }}
+
+      # VISUAL FORMAT
+      - conditions:
+          - condition: template
+            value_template: "{{ notif_style == 'visual' }}"
+        sequence:
+          - variables:
+              report_title: "Daily Dashboard"
+              report_message: >
+                📊 PERFORMANCE DASHBOARD
+                {{ now().strftime('%A, %B %d') }}
+
+                ☀️ SOLAR
+                {{ '█' * ((pv_today / 20) | int | min(20)) }}{{ '░' * (20 - ((pv_today / 20) | int | min(20))) }} {{ pv_today }} kWh
+
+                🔋 BATTERY
+                {{ '█' * ((batt_soc / 5) | int) }}{{ '░' * (20 - ((batt_soc / 5) | int)) }} {{ batt_soc }}%
+
+                📈 SELF-SUFFICIENCY
+                {{ '█' * ((self_sufficiency / 5) | int) }}{{ '░' * (20 - ((self_sufficiency / 5) | int)) }} {{ self_sufficiency }}%
+
+                📉 GRID DEPENDENCY
+                {{ '█' * ((grid_dependency / 5) | int) }}{{ '░' * (20 - ((grid_dependency / 5) | int)) }} {{ grid_dependency }}%
+
+                💰 SAVINGS: {{ curr_symbol }}{{ total_savings }}
+
+                {% if alert_low_sufficiency or alert_high_grid_dep %}
+                ⚠️ ALERTS ACTIVE
+                {% else %}
+                ✅ ALL SYSTEMS NORMAL
+                {% endif %}
+
+  # Send primary notification
+  - service: !input notification_service
+    data:
+      title: "{{ report_title }}"
+      message: "{{ report_message }}"
+      data:
+        tag: "srne_performance_dashboard"
+        group: "srne_daily_reports"
+        importance: "high"
+        ttl: 86400
+
+  # Send secondary notification if configured
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ secondary_notification_service | length > 0 }}"
+        sequence:
+          - service: "{{ secondary_notification_service }}"
+            data:
+              title: "{{ report_title }}"
+              message: "{{ report_message }}"
+
+  # Create persistent notification
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ create_persistent_notification }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "{{ report_title }} - {{ now().strftime('%Y-%m-%d') }}"
+              message: "{{ report_message }}"
+              notification_id: "srne_performance_dashboard"
+
+mode: single
+max_exceeded: silent
