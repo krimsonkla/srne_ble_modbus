@@ -1,0 +1,437 @@
+blueprint:
+  name: "SRNE Inverter - EV Charging Optimizer"
+  description: >
+    Intelligent EV charging that prioritizes off-peak grid hours and solar surplus periods.
+    Automatically limits grid draw to prevent overload while maximizing renewable energy usage.
+    Includes time-of-use scheduling and dynamic current adjustment based on available power.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/2_optimization/ev_charging_optimizer.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    ev_charger_switch:
+      name: EV Charger Switch
+      description: Switch to control EV charger
+      selector:
+        entity:
+          domain: switch
+
+    ev_charging_current:
+      name: EV Charging Current Control (Optional)
+      description: Number entity to control EV charging current (if supported)
+      default: {}
+      selector:
+        entity:
+          domain: number
+
+    pv_power_sensor:
+      name: PV Power Sensor
+      description: Solar panel power production sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    load_power_sensor:
+      name: Load Power Sensor (Without EV)
+      description: House load power sensor (excluding EV charger)
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    grid_power_sensor:
+      name: Grid Power Sensor
+      description: Grid import/export power sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    # Off-peak time settings
+    off_peak_start_time:
+      name: Off-Peak Start Time
+      description: When off-peak electricity rates begin
+      default: "22:00:00"
+      selector:
+        time:
+
+    off_peak_end_time:
+      name: Off-Peak End Time
+      description: When off-peak electricity rates end
+      default: "06:00:00"
+      selector:
+        time:
+
+    enable_off_peak_charging:
+      name: Enable Off-Peak Grid Charging
+      description: Allow EV charging from grid during off-peak hours
+      default: true
+      selector:
+        boolean:
+
+    off_peak_max_current:
+      name: Off-Peak Maximum Current
+      description: Maximum charging current during off-peak hours (amps)
+      default: 32
+      selector:
+        number:
+          min: 6
+          max: 80
+          step: 2
+          unit_of_measurement: "A"
+
+    # Solar charging settings
+    enable_solar_charging:
+      name: Enable Solar Surplus Charging
+      description: Charge EV when solar surplus is available
+      default: true
+      selector:
+        boolean:
+
+    solar_surplus_threshold:
+      name: Solar Surplus Threshold
+      description: Minimum surplus power to start solar charging (watts)
+      default: 1500
+      selector:
+        number:
+          min: 500
+          max: 5000
+          step: 100
+          unit_of_measurement: "W"
+
+    solar_min_current:
+      name: Solar Minimum Current
+      description: Minimum charging current for solar mode (amps)
+      default: 6
+      selector:
+        number:
+          min: 6
+          max: 16
+          step: 2
+          unit_of_measurement: "A"
+
+    battery_reserve_soc:
+      name: Battery Reserve SOC
+      description: Don't use battery for EV below this SOC (%)
+      default: 50
+      selector:
+        number:
+          min: 20
+          max: 80
+          step: 5
+          unit_of_measurement: "%"
+
+    # Grid limits
+    max_grid_draw:
+      name: Maximum Grid Draw
+      description: Maximum allowed grid import for EV charging (watts)
+      default: 3000
+      selector:
+        number:
+          min: 1000
+          max: 10000
+          step: 500
+          unit_of_measurement: "W"
+
+    grid_overload_threshold:
+      name: Grid Overload Threshold
+      description: Reduce EV charging if grid draw exceeds this (watts)
+      default: 5000
+      selector:
+        number:
+          min: 2000
+          max: 15000
+          step: 500
+          unit_of_measurement: "W"
+
+    # Smart features
+    enable_dynamic_adjustment:
+      name: Enable Dynamic Current Adjustment
+      description: Automatically adjust charging current based on available power
+      default: true
+      selector:
+        boolean:
+
+    adjustment_interval:
+      name: Adjustment Check Interval
+      description: How often to check and adjust charging (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 15
+          step: 1
+          unit_of_measurement: "minutes"
+
+    notification_service:
+      name: Notification Service
+      description: Notification service for charging status updates
+      default: ""
+      selector:
+        text:
+
+    notify_on_start:
+      name: Notify on Charging Start
+      description: Send notification when EV charging starts
+      default: true
+      selector:
+        boolean:
+
+    notify_on_stop:
+      name: Notify on Charging Stop
+      description: Send notification when EV charging stops
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # Time-based triggers for off-peak periods
+  - platform: time
+    at: !input off_peak_start_time
+    id: "off_peak_start"
+
+  - platform: time
+    at: !input off_peak_end_time
+    id: "off_peak_end"
+
+  # Regular adjustment interval
+  - platform: time_pattern
+    minutes: !input adjustment_interval
+    id: "periodic_check"
+
+  # Solar power changes
+  - platform: state
+    entity_id: !input pv_power_sensor
+    id: "solar_change"
+
+  # Grid power monitoring
+  - platform: numeric_state
+    entity_id: !input grid_power_sensor
+    above: !input grid_overload_threshold
+    id: "grid_overload"
+
+  # Battery SOC monitoring
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input battery_reserve_soc
+    id: "battery_low"
+
+condition: []
+
+action:
+  - variables:
+      pv_power: "{{ states(pv_power_sensor) | float(0) }}"
+      load_power: "{{ states(load_power_sensor) | float(0) }}"
+      grid_power: "{{ states(grid_power_sensor) | float(0) }}"
+      battery_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      charger_state: "{{ states(ev_charger_switch) }}"
+      current_time: "{{ now().time() }}"
+      off_peak_start: !input off_peak_start_time
+      off_peak_end: !input off_peak_end_time
+
+  # Determine if we're in off-peak period
+  - variables:
+      in_off_peak: >
+        {% set ct = now().time() %}
+        {% set start = strptime(off_peak_start, '%H:%M:%S').time() %}
+        {% set end = strptime(off_peak_end, '%H:%M:%S').time() %}
+        {% if start < end %}
+          {{ ct >= start and ct < end }}
+        {% else %}
+          {{ ct >= start or ct < end }}
+        {% endif %}
+
+      surplus_power: "{{ pv_power - load_power }}"
+      enable_off_peak: !input enable_off_peak_charging
+      enable_solar: !input enable_solar_charging
+      solar_threshold: !input solar_surplus_threshold
+      battery_reserve: !input battery_reserve_soc
+      max_grid: !input max_grid_draw
+
+  # Decision logic
+  - variables:
+      should_charge_off_peak: >
+        {{ enable_off_peak and in_off_peak and battery_soc > battery_reserve }}
+
+      should_charge_solar: >
+        {{ enable_solar and surplus_power > solar_threshold and battery_soc > battery_reserve }}
+
+      should_charge: >
+        {{ should_charge_off_peak or should_charge_solar }}
+
+      charging_mode: >
+        {% if should_charge_solar %}
+          solar
+        {% elif should_charge_off_peak %}
+          off-peak
+        {% else %}
+          disabled
+        {% endif %}
+
+  # Handle different trigger scenarios
+  - choose:
+      # Grid overload - reduce or stop charging
+      - conditions:
+          - condition: trigger
+            id: "grid_overload"
+          - condition: state
+            entity_id: !input ev_charger_switch
+            state: "on"
+        sequence:
+          - service: switch.turn_off
+            target:
+              entity_id: !input ev_charger_switch
+
+          - service: system_log.write
+            data:
+              message: "EV charging stopped due to grid overload ({{ grid_power }}W)"
+              level: warning
+              logger: homeassistant.components.srne_ble_modbus.ev_optimizer
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 and notify_on_stop }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "⚠️ EV Charging Stopped"
+                      message: "Grid overload detected ({{ grid_power | round(0) }}W). EV charging paused."
+
+      # Battery low - stop charging
+      - conditions:
+          - condition: trigger
+            id: "battery_low"
+          - condition: state
+            entity_id: !input ev_charger_switch
+            state: "on"
+        sequence:
+          - service: switch.turn_off
+            target:
+              entity_id: !input ev_charger_switch
+
+          - service: system_log.write
+            data:
+              message: "EV charging stopped due to low battery SOC ({{ battery_soc }}%)"
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.ev_optimizer
+
+      # Normal operation - evaluate charging conditions
+      - conditions: []
+        sequence:
+          - choose:
+              # Should start charging
+              - conditions:
+                  - condition: template
+                    value_template: "{{ should_charge }}"
+                  - condition: state
+                    entity_id: !input ev_charger_switch
+                    state: "off"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input ev_charger_switch
+
+                  - service: system_log.write
+                    data:
+                      message: "EV charging started in {{ charging_mode }} mode"
+                      level: info
+                      logger: homeassistant.components.srne_ble_modbus.ev_optimizer
+
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ notification_service | length > 0 and notify_on_start }}"
+                        sequence:
+                          - service: !input notification_service
+                            data:
+                              title: "🔌 EV Charging Started"
+                              message: >
+                                Charging mode: {{ charging_mode }}
+                                {% if charging_mode == 'solar' %}
+                                Solar surplus: {{ surplus_power | round(0) }}W
+                                {% endif %}
+                                Battery SOC: {{ battery_soc }}%
+
+              # Should stop charging
+              - conditions:
+                  - condition: template
+                    value_template: "{{ not should_charge }}"
+                  - condition: state
+                    entity_id: !input ev_charger_switch
+                    state: "on"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input ev_charger_switch
+
+                  - service: system_log.write
+                    data:
+                      message: "EV charging stopped - conditions no longer met"
+                      level: info
+                      logger: homeassistant.components.srne_ble_modbus.ev_optimizer
+
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ notification_service | length > 0 and notify_on_stop }}"
+                        sequence:
+                          - service: !input notification_service
+                            data:
+                              title: "EV Charging Stopped"
+                              message: "Charging conditions no longer met."
+
+          # Dynamic current adjustment (if enabled and charging)
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_dynamic_adjustment }}"
+                  - condition: state
+                    entity_id: !input ev_charger_switch
+                    state: "on"
+                  - condition: template
+                    value_template: "{{ ev_charging_current is defined and ev_charging_current != none }}"
+                sequence:
+                  - variables:
+                      target_current: >
+                        {% if charging_mode == 'solar' %}
+                          {% set available = (surplus_power / 230) | round(0) %}
+                          {% set min_solar = solar_min_current %}
+                          {{ [available, min_solar] | max | min(off_peak_max_current) }}
+                        {% elif charging_mode == 'off-peak' %}
+                          {% set grid_headroom = max_grid - grid_power %}
+                          {% set available = (grid_headroom / 230) | round(0) %}
+                          {{ [available, 6] | max | min(off_peak_max_current) }}
+                        {% else %}
+                          0
+                        {% endif %}
+
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ target_current >= 6 }}"
+                        sequence:
+                          - service: number.set_value
+                            target:
+                              entity_id: !input ev_charging_current
+                            data:
+                              value: "{{ target_current }}"
+
+mode: queued
+max: 5

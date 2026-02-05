@@ -1,0 +1,597 @@
+blueprint:
+  name: "SRNE Inverter - Solar Midday Boost"
+  description: >
+    Maximizes solar energy utilization during peak PV production hours (typically 10 AM - 3 PM).
+    Prioritizes charging from solar panels and optimizes power balance for maximum renewable
+    energy capture while preventing grid export if desired.
+
+    Features:
+    - Automatic PV priority switching during solar peak hours
+    - Configurable time windows based on your location
+    - Power balance optimization for charging priority
+    - Optional AC charging disable during solar hours
+    - Minimum PV power threshold to prevent switching in cloudy conditions
+    - Maximum SOC limit to reserve capacity for peak production
+    - Weather-aware scheduling
+
+    Ideal for:
+    - Maximizing solar self-consumption
+    - Reducing grid dependency during daytime
+    - Optimizing battery charging from renewable sources
+    - Coordinating with time-of-use pricing
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/2_optimization/solar_midday_boost.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_inverter
+
+    pv_power_sensor:
+      name: PV Power Sensor
+      description: Solar panel power output sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    # Time Configuration
+    solar_boost_start_time:
+      name: Solar Boost Start Time
+      description: When to begin solar optimization (typically 10 AM)
+      default: "10:00:00"
+      selector:
+        time:
+
+    solar_boost_end_time:
+      name: Solar Boost End Time
+      description: When to end solar optimization (typically 3 PM)
+      default: "15:00:00"
+      selector:
+        time:
+
+    # Power Thresholds
+    min_pv_power:
+      name: Minimum PV Power
+      description: Only activate solar boost if PV power exceeds this value
+      default: 500
+      selector:
+        number:
+          min: 100
+          max: 3000
+          step: 100
+          unit_of_measurement: "W"
+
+    optimal_pv_power:
+      name: Optimal PV Power
+      description: PV power level considered optimal for boost mode
+      default: 2000
+      selector:
+        number:
+          min: 500
+          max: 10000
+          step: 100
+          unit_of_measurement: "W"
+
+    # Battery Management
+    max_soc_for_boost:
+      name: Maximum SOC for Boost
+      description: Disable boost if battery above this level (reserve capacity)
+      default: 95
+      selector:
+        number:
+          min: 80
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+
+    min_soc_for_loads:
+      name: Minimum SOC for Loads
+      description: Minimum battery level to use for loads during solar hours
+      default: 40
+      selector:
+        number:
+          min: 20
+          max: 60
+          step: 5
+          unit_of_measurement: "%"
+
+    # Control Entities
+    charge_source_priority:
+      name: Charge Source Priority Select
+      description: Entity to control charge source priority
+      selector:
+        entity:
+          domain: select
+
+    pv_power_balance:
+      name: PV Power Balance Select (Optional)
+      description: Entity to control PV power balance (Charging/Load priority)
+      default: {}
+      selector:
+        entity:
+          domain: select
+
+    max_ac_charge_current:
+      name: Max AC Charge Current Number (Optional)
+      description: Entity to control AC charge current (will be set to 0 during boost)
+      default: {}
+      selector:
+        entity:
+          domain: number
+
+    output_priority:
+      name: Output Priority Select (Optional)
+      description: Entity to control output priority
+      default: {}
+      selector:
+        entity:
+          domain: select
+
+    # Mode Configuration
+    solar_boost_priority:
+      name: Solar Boost Priority Mode
+      description: Priority mode during solar boost hours
+      default: "PV Priority"
+      selector:
+        select:
+          options:
+            - "PV Priority"
+            - "Solar First"
+
+    pv_balance_mode:
+      name: PV Power Balance Mode
+      description: How to balance PV power during boost
+      default: "Charging Priority"
+      selector:
+        select:
+          options:
+            - "Charging Priority"
+            - "Load Priority"
+            - "Balanced"
+
+    normal_priority:
+      name: Normal Priority Mode
+      description: Priority mode outside solar boost hours
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Battery First"
+            - "Utility First"
+
+    disable_ac_charging:
+      name: Disable AC Charging During Boost
+      description: Completely disable AC charging to force solar-only charging
+      default: true
+      selector:
+        boolean:
+
+    # Advanced Options
+    activation_delay:
+      name: Activation Delay
+      description: PV power must be sufficient for this duration before activating
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: "minutes"
+
+    deactivation_delay:
+      name: Deactivation Delay
+      description: Wait time before deactivating if PV power drops
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 1
+          unit_of_measurement: "minutes"
+
+    enable_cloud_detection:
+      name: Enable Cloud Detection
+      description: Automatically adjust mode when clouds reduce PV output
+      default: true
+      selector:
+        boolean:
+
+    cloudy_pv_threshold:
+      name: Cloudy PV Threshold
+      description: PV power below this indicates cloudy conditions
+      default: 300
+      selector:
+        number:
+          min: 100
+          max: 1000
+          step: 50
+          unit_of_measurement: "W"
+
+    # Notifications
+    notification_service:
+      name: Notification Service (Optional)
+      description: Service for solar boost status updates
+      default: ""
+      selector:
+        text:
+
+    notify_on_activation:
+      name: Notify on Activation
+      description: Send notification when solar boost activates
+      default: false
+      selector:
+        boolean:
+
+    notify_on_deactivation:
+      name: Notify on Deactivation
+      description: Send notification when solar boost deactivates
+      default: false
+      selector:
+        boolean:
+
+trigger:
+  # Solar boost window starts
+  - platform: time
+    at: !input solar_boost_start_time
+    id: "boost_window_start"
+
+  # Solar boost window ends
+  - platform: time
+    at: !input solar_boost_end_time
+    id: "boost_window_end"
+
+  # PV power sufficient for boost
+  - platform: numeric_state
+    entity_id: !input pv_power_sensor
+    above: !input min_pv_power
+    for:
+      minutes: !input activation_delay
+    id: "pv_sufficient"
+
+  # PV power dropped (clouds)
+  - platform: numeric_state
+    entity_id: !input pv_power_sensor
+    below: !input cloudy_pv_threshold
+    for:
+      minutes: !input deactivation_delay
+    id: "pv_insufficient"
+
+  # Battery SOC reached maximum
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    above: !input max_soc_for_boost
+    id: "battery_full"
+
+condition: []
+
+action:
+  - variables:
+      pv_power: "{{ states(pv_power_sensor) | float(0) }}"
+      soc: "{{ states(battery_soc_sensor) | float(50) }}"
+      current_time: "{{ now().strftime('%H:%M:%S') }}"
+      boost_start: !input solar_boost_start_time
+      boost_end: !input solar_boost_end_time
+      is_boost_window: >
+        {% set now_time = current_time %}
+        {% set start = boost_start %}
+        {% set end = boost_end %}
+        {{ start <= now_time < end }}
+      trigger_id: "{{ trigger.id }}"
+      timestamp: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      min_pv: !input min_pv_power
+      max_soc: !input max_soc_for_boost
+      disable_ac: !input disable_ac_charging
+      cloud_detect: !input enable_cloud_detection
+
+  - choose:
+      # ==========================================
+      # BOOST WINDOW START
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "boost_window_start"
+          # Only activate if PV power sufficient and battery not full
+          - condition: numeric_state
+            entity_id: !input pv_power_sensor
+            above: !input min_pv_power
+          - condition: numeric_state
+            entity_id: !input battery_soc_sensor
+            below: !input max_soc_for_boost
+        sequence:
+          # Switch to PV priority
+          - service: select.select_option
+            target:
+              entity_id: !input charge_source_priority
+            data:
+              option: !input solar_boost_priority
+
+          # Set PV power balance if available
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ pv_power_balance is defined and pv_power_balance != none }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input pv_power_balance
+                    data:
+                      option: !input pv_balance_mode
+
+          # Disable AC charging if configured
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ disable_ac }}"
+                  - condition: template
+                    value_template: "{{ max_ac_charge_current is defined and max_ac_charge_current != none }}"
+                sequence:
+                  - service: number.set_value
+                    target:
+                      entity_id: !input max_ac_charge_current
+                    data:
+                      value: 0
+
+          # Set output priority if available
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ output_priority is defined and output_priority != none }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input output_priority
+                    data:
+                      option: !input solar_boost_priority
+
+          # Optional notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_activation }}"
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "☀️ Solar Midday Boost Activated"
+                      message: >
+                        Solar optimization started at {{ timestamp }}.
+
+                        Configuration:
+                        - PV Power: {{ pv_power }}W
+                        - Battery SOC: {{ soc }}%
+                        - Priority: {{ solar_boost_priority }}
+                        - PV Balance: {{ pv_balance_mode }}
+                        {% if disable_ac %}
+                        - AC Charging: Disabled
+                        {% endif %}
+                      data:
+                        tag: "srne_solar_boost"
+
+          # Log activation
+          - service: system_log.write
+            data:
+              message: >
+                Solar Midday Boost: Activated at {{ timestamp }}, PV {{ pv_power }}W, SOC {{ soc }}%
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # PV POWER SUFFICIENT (DURING WINDOW)
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "pv_sufficient"
+          - condition: template
+            value_template: "{{ is_boost_window }}"
+          - condition: numeric_state
+            entity_id: !input battery_soc_sensor
+            below: !input max_soc_for_boost
+        sequence:
+          # Activate solar boost
+          - service: select.select_option
+            target:
+              entity_id: !input charge_source_priority
+            data:
+              option: !input solar_boost_priority
+
+          # Set PV balance
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ pv_power_balance is defined and pv_power_balance != none }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input pv_power_balance
+                    data:
+                      option: !input pv_balance_mode
+
+          # Disable AC charging
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ disable_ac }}"
+                  - condition: template
+                    value_template: "{{ max_ac_charge_current is defined and max_ac_charge_current != none }}"
+                sequence:
+                  - service: number.set_value
+                    target:
+                      entity_id: !input max_ac_charge_current
+                    data:
+                      value: 0
+
+          # Log
+          - service: system_log.write
+            data:
+              message: >
+                Solar Midday Boost: Re-activated, PV {{ pv_power }}W sufficient
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # PV POWER INSUFFICIENT (CLOUDS)
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "pv_insufficient"
+          - condition: template
+            value_template: "{{ is_boost_window }}"
+          - condition: template
+            value_template: "{{ cloud_detect }}"
+        sequence:
+          # Switch to normal mode
+          - service: select.select_option
+            target:
+              entity_id: !input charge_source_priority
+            data:
+              option: !input normal_priority
+
+          # Re-enable AC charging
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ disable_ac }}"
+                  - condition: template
+                    value_template: "{{ max_ac_charge_current is defined and max_ac_charge_current != none }}"
+                sequence:
+                  - service: number.set_value
+                    target:
+                      entity_id: !input max_ac_charge_current
+                    data:
+                      value: 30
+
+          # Log cloud detection
+          - service: system_log.write
+            data:
+              message: >
+                Solar Midday Boost: Suspended due to low PV ({{ pv_power }}W - clouds detected)
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # BATTERY FULL
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "battery_full"
+          - condition: template
+            value_template: "{{ is_boost_window }}"
+        sequence:
+          # Switch to load priority to use solar for loads
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ pv_power_balance is defined and pv_power_balance != none }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input pv_power_balance
+                    data:
+                      option: "Load Priority"
+
+          # Log
+          - service: system_log.write
+            data:
+              message: >
+                Solar Midday Boost: Battery full ({{ soc }}%), switched to load priority
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # BOOST WINDOW END
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "boost_window_end"
+        sequence:
+          # Restore normal priority
+          - service: select.select_option
+            target:
+              entity_id: !input charge_source_priority
+            data:
+              option: !input normal_priority
+
+          # Restore PV balance if available
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ pv_power_balance is defined and pv_power_balance != none }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input pv_power_balance
+                    data:
+                      option: "Balanced"
+
+          # Re-enable AC charging
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ disable_ac }}"
+                  - condition: template
+                    value_template: "{{ max_ac_charge_current is defined and max_ac_charge_current != none }}"
+                sequence:
+                  - service: number.set_value
+                    target:
+                      entity_id: !input max_ac_charge_current
+                    data:
+                      value: 30
+
+          # Restore output priority if available
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ output_priority is defined and output_priority != none }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input output_priority
+                    data:
+                      option: !input normal_priority
+
+          # Optional notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_deactivation }}"
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "✅ Solar Midday Boost Ended"
+                      message: >
+                        Solar optimization period ended at {{ timestamp }}.
+
+                        Final Status:
+                        - PV Power: {{ pv_power }}W
+                        - Battery SOC: {{ soc }}%
+                        - Restored {{ normal_priority }}
+                      data:
+                        tag: "srne_solar_boost"
+
+          # Log deactivation
+          - service: system_log.write
+            data:
+              message: >
+                Solar Midday Boost: Ended at {{ timestamp }}, final SOC {{ soc }}%
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+mode: single
+max_exceeded: silent

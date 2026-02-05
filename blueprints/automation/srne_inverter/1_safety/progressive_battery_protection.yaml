@@ -1,0 +1,716 @@
+blueprint:
+  name: "SRNE Inverter - Progressive Battery Protection"
+  description: >
+    Multi-stage battery protection with intelligent load shedding, temperature-aware charging,
+    and overvoltage prevention. Combines low battery alerts, battery preservation, and
+    graduated protection levels to maximize battery lifespan while ensuring system safety.
+
+    Features:
+    - Progressive load shedding at 30%, 20%, and 10% SOC
+    - Temperature-aware charge/discharge cutoffs
+    - Overvoltage protection with graduated current reduction
+    - Coordinated protection with configurable hysteresis
+    - Multi-service notifications with severity levels
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/1_safety/progressive_battery_protection.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_inverter
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    battery_temp_sensor:
+      name: Battery Temperature Sensor
+      description: Battery temperature sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    battery_voltage_sensor:
+      name: Battery Voltage Sensor
+      description: Battery voltage sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: voltage
+
+    # SOC Thresholds
+    warning_soc:
+      name: Warning SOC Level
+      description: First protection stage - reduce non-essential loads
+      default: 30
+      selector:
+        number:
+          min: 20
+          max: 50
+          step: 5
+          unit_of_measurement: "%"
+
+    critical_soc:
+      name: Critical SOC Level
+      description: Second protection stage - shed more loads
+      default: 20
+      selector:
+        number:
+          min: 15
+          max: 30
+          step: 5
+          unit_of_measurement: "%"
+
+    emergency_soc:
+      name: Emergency SOC Level
+      description: Final protection stage - minimum essential loads only
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 20
+          step: 5
+          unit_of_measurement: "%"
+
+    # Temperature Thresholds
+    charge_max_temperature:
+      name: Charge Maximum Temperature
+      description: Stop charging when battery exceeds this temperature
+      default: 45
+      selector:
+        number:
+          min: 35
+          max: 60
+          step: 1
+          unit_of_measurement: "°C"
+
+    discharge_max_temperature:
+      name: Discharge Maximum Temperature
+      description: Stop discharging when battery exceeds this temperature
+      default: 60
+      selector:
+        number:
+          min: 40
+          max: 70
+          step: 1
+          unit_of_measurement: "°C"
+
+    temp_hysteresis:
+      name: Temperature Hysteresis
+      description: Temperature must drop this much below threshold before resuming
+      default: 5
+      selector:
+        number:
+          min: 2
+          max: 10
+          step: 1
+          unit_of_measurement: "°C"
+
+    # Voltage Thresholds
+    overvoltage_warning:
+      name: Overvoltage Warning Level
+      description: Reduce charging current at this voltage
+      default: 56.0
+      selector:
+        number:
+          min: 54.0
+          max: 60.0
+          step: 0.5
+          unit_of_measurement: "V"
+
+    overvoltage_critical:
+      name: Overvoltage Critical Level
+      description: Stop charging immediately at this voltage
+      default: 58.0
+      selector:
+        number:
+          min: 56.0
+          max: 62.0
+          step: 0.5
+          unit_of_measurement: "V"
+
+    # Load Shedding Configuration
+    warning_loads:
+      name: Warning Level Loads (Optional)
+      description: Non-essential loads to shed at 30% SOC
+      default: []
+      selector:
+        entity:
+          domain: switch
+          multiple: true
+
+    critical_loads:
+      name: Critical Level Loads (Optional)
+      description: Additional loads to shed at 20% SOC
+      default: []
+      selector:
+        entity:
+          domain: switch
+          multiple: true
+
+    emergency_loads:
+      name: Emergency Level Loads (Optional)
+      description: Final loads to shed at 10% SOC
+      default: []
+      selector:
+        entity:
+          domain: switch
+          multiple: true
+
+    # Control Entities
+    max_ac_charge_current:
+      name: Max AC Charge Current Number Entity (Optional)
+      description: Number entity to reduce charging current during overvoltage
+      default: {}
+      selector:
+        entity:
+          domain: number
+
+    charging_switch:
+      name: Battery Charging Switch (Optional)
+      description: Switch to completely disable charging
+      default: {}
+      selector:
+        entity:
+          domain: switch
+
+    priority_select:
+      name: Priority Select Entity
+      description: Energy priority control
+      selector:
+        entity:
+          domain: select
+
+    safe_mode_priority:
+      name: Safe Mode Priority
+      description: Priority to switch to during protection events
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Utility First"
+            - "Solar First"
+            - "Battery First"
+
+    # Notification Services
+    notification_service_1:
+      name: Primary Notification Service
+      description: First notification service (e.g., mobile app)
+      selector:
+        text:
+
+    notification_service_2:
+      name: Secondary Notification Service (Optional)
+      description: Second notification service for critical alerts
+      default: ""
+      selector:
+        text:
+
+    # Advanced Options
+    protection_hysteresis:
+      name: Protection Hysteresis Duration
+      description: SOC must remain below threshold for this duration
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 300
+          step: 10
+          unit_of_measurement: "seconds"
+
+    recovery_delay:
+      name: Recovery Delay
+      description: Wait time before restoring loads after conditions normalize
+      default: 300
+      selector:
+        number:
+          min: 30
+          max: 600
+          step: 30
+          unit_of_measurement: "seconds"
+
+trigger:
+  # SOC-based triggers
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input warning_soc
+    for:
+      seconds: !input protection_hysteresis
+    id: "warning_soc"
+
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input critical_soc
+    for:
+      seconds: !input protection_hysteresis
+    id: "critical_soc"
+
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input emergency_soc
+    for:
+      seconds: !input protection_hysteresis
+    id: "emergency_soc"
+
+  # Temperature-based triggers
+  - platform: numeric_state
+    entity_id: !input battery_temp_sensor
+    above: !input charge_max_temperature
+    id: "high_charge_temp"
+
+  - platform: numeric_state
+    entity_id: !input battery_temp_sensor
+    above: !input discharge_max_temperature
+    id: "high_discharge_temp"
+
+  # Voltage-based triggers
+  - platform: numeric_state
+    entity_id: !input battery_voltage_sensor
+    above: !input overvoltage_warning
+    id: "overvoltage_warning"
+
+  - platform: numeric_state
+    entity_id: !input battery_voltage_sensor
+    above: !input overvoltage_critical
+    id: "overvoltage_critical"
+
+  # Recovery triggers
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    above: !input warning_soc
+    for:
+      seconds: !input recovery_delay
+    id: "soc_recovered"
+
+  - platform: template
+    value_template: >
+      {{ states(battery_temp_sensor) | float(100) < (charge_max_temperature - temp_hysteresis) }}
+    for:
+      seconds: 30
+    id: "temp_recovered"
+
+condition: []
+
+action:
+  - variables:
+      soc: "{{ states(battery_soc_sensor) | float(100) }}"
+      temp: "{{ states(battery_temp_sensor) | float(25) }}"
+      voltage: "{{ states(battery_voltage_sensor) | float(48) }}"
+      trigger_id: "{{ trigger.id }}"
+      warning_soc_value: !input warning_soc
+      critical_soc_value: !input critical_soc
+      emergency_soc_value: !input emergency_soc
+      charge_max_temp: !input charge_max_temperature
+      discharge_max_temp: !input discharge_max_temperature
+      overvolt_warn: !input overvoltage_warning
+      overvolt_crit: !input overvoltage_critical
+      temp_hyst: !input temp_hysteresis
+
+  - choose:
+      # ==========================================
+      # SOC-BASED PROTECTION STAGES
+      # ==========================================
+
+      # Warning Level (30%)
+      - conditions:
+          - condition: trigger
+            id: "warning_soc"
+        sequence:
+          # Shed warning level loads
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ warning_loads | length > 0 }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input warning_loads
+
+          # Send warning notification
+          - service: !input notification_service_1
+            data:
+              title: "⚠️ Battery Protection: Warning Level"
+              message: >
+                Battery SOC at {{ soc }}%. Entering first protection stage.
+
+                Actions taken:
+                - Non-essential loads reduced
+                - Priority: {{ safe_mode_priority }}
+
+                Current status:
+                - Temperature: {{ temp }}°C
+                - Voltage: {{ voltage }}V
+              data:
+                priority: high
+                tag: "srne_battery_warning"
+
+          # Log event
+          - service: system_log.write
+            data:
+              message: >
+                Progressive Battery Protection: Warning level activated at {{ soc }}%
+              level: warning
+              logger: homeassistant.components.srne_inverter
+
+      # Critical Level (20%)
+      - conditions:
+          - condition: trigger
+            id: "critical_soc"
+        sequence:
+          # Switch to safe mode
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input safe_mode_priority
+
+          # Shed critical level loads
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ critical_loads | length > 0 }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input critical_loads
+
+          # Send critical notification to both services
+          - service: !input notification_service_1
+            data:
+              title: "🚨 Battery Protection: Critical Level"
+              message: >
+                CRITICAL: Battery SOC at {{ soc }}%!
+
+                Actions taken:
+                - Additional loads shed
+                - Switched to {{ safe_mode_priority }}
+                - Essential loads only
+
+                Status: Temp {{ temp }}°C, Voltage {{ voltage }}V
+              data:
+                priority: high
+                ttl: 0
+                tag: "srne_battery_critical"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service_2 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_2
+                    data:
+                      title: "🚨 CRITICAL: Battery at {{ soc }}%"
+                      message: "Immediate attention required! Check Home Assistant."
+
+          # Log critical event
+          - service: system_log.write
+            data:
+              message: >
+                Progressive Battery Protection: CRITICAL level at {{ soc }}%
+              level: error
+              logger: homeassistant.components.srne_inverter
+
+      # Emergency Level (10%)
+      - conditions:
+          - condition: trigger
+            id: "emergency_soc"
+        sequence:
+          # Shed emergency loads (keep only absolute essentials)
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ emergency_loads | length > 0 }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input emergency_loads
+
+          # Emergency notification
+          - service: !input notification_service_1
+            data:
+              title: "🆘 EMERGENCY: Battery at {{ soc }}%"
+              message: >
+                EMERGENCY PROTECTION ACTIVATED!
+
+                Battery critically low. System entering minimum operation mode.
+                All non-essential loads disabled.
+
+                PREPARE FOR POSSIBLE POWER LOSS!
+              data:
+                priority: high
+                ttl: 0
+                tag: "srne_battery_emergency"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service_2 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_2
+                    data:
+                      title: "🆘 EMERGENCY: Battery {{ soc }}%"
+                      message: "POWER LOSS IMMINENT! Act now!"
+
+          # Log emergency
+          - service: system_log.write
+            data:
+              message: >
+                Progressive Battery Protection: EMERGENCY level at {{ soc }}%
+              level: critical
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # TEMPERATURE PROTECTION
+      # ==========================================
+
+      # High charging temperature
+      - conditions:
+          - condition: trigger
+            id: "high_charge_temp"
+        sequence:
+          # Disable charging
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ charging_switch is defined and charging_switch != none }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input charging_switch
+
+          # Notify
+          - service: !input notification_service_1
+            data:
+              title: "🌡️ High Battery Temperature"
+              message: >
+                Battery temperature {{ temp }}°C exceeds charge limit ({{ charge_max_temp }}°C).
+                Charging disabled for protection.
+
+                Will resume when temp drops below {{ charge_max_temp - temp_hyst }}°C.
+              data:
+                priority: high
+                tag: "srne_temp_protection"
+
+          # Log
+          - service: system_log.write
+            data:
+              message: >
+                Temperature Protection: Charging stopped at {{ temp }}°C
+              level: warning
+              logger: homeassistant.components.srne_inverter
+
+      # High discharge temperature
+      - conditions:
+          - condition: trigger
+            id: "high_discharge_temp"
+        sequence:
+          # Switch to grid priority
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: "Utility First"
+
+          # Notify
+          - service: !input notification_service_1
+            data:
+              title: "🌡️ Critical Battery Temperature"
+              message: >
+                Battery temperature {{ temp }}°C exceeds discharge limit ({{ discharge_max_temp }}°C)!
+                Switched to Utility First to reduce battery load.
+
+                Status: SOC {{ soc }}%, Voltage {{ voltage }}V
+              data:
+                priority: high
+                ttl: 0
+                tag: "srne_temp_critical"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service_2 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_2
+                    data:
+                      title: "🌡️ CRITICAL: Battery temp {{ temp }}°C"
+                      message: "Thermal protection activated!"
+
+      # ==========================================
+      # OVERVOLTAGE PROTECTION
+      # ==========================================
+
+      # Overvoltage warning - reduce current
+      - conditions:
+          - condition: trigger
+            id: "overvoltage_warning"
+        sequence:
+          # Reduce charge current if entity available
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ max_ac_charge_current is defined and max_ac_charge_current != none }}"
+                sequence:
+                  - service: number.set_value
+                    target:
+                      entity_id: !input max_ac_charge_current
+                    data:
+                      value: >
+                        {% set current_val = states(max_ac_charge_current) | float(30) %}
+                        {{ [current_val * 0.5, 10] | max }}
+
+          # Notify
+          - service: !input notification_service_1
+            data:
+              title: "⚡ Overvoltage Warning"
+              message: >
+                Battery voltage {{ voltage }}V approaching limit.
+                Charging current reduced for protection.
+
+                Status: SOC {{ soc }}%, Temp {{ temp }}°C
+              data:
+                tag: "srne_overvoltage"
+
+      # Overvoltage critical - stop charging
+      - conditions:
+          - condition: trigger
+            id: "overvoltage_critical"
+        sequence:
+          # Stop all charging
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ charging_switch is defined and charging_switch != none }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input charging_switch
+
+          # Emergency notification
+          - service: !input notification_service_1
+            data:
+              title: "⚡ CRITICAL OVERVOLTAGE"
+              message: >
+                Battery voltage {{ voltage }}V CRITICAL!
+                All charging stopped immediately.
+
+                Status: SOC {{ soc }}%, Temp {{ temp }}°C
+                Check battery system immediately!
+              data:
+                priority: high
+                ttl: 0
+                tag: "srne_overvoltage_critical"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service_2 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_2
+                    data:
+                      title: "⚡ OVERVOLTAGE: {{ voltage }}V"
+                      message: "Charging stopped! Check battery!"
+
+      # ==========================================
+      # RECOVERY
+      # ==========================================
+
+      # SOC recovered
+      - conditions:
+          - condition: trigger
+            id: "soc_recovered"
+        sequence:
+          # Restore warning loads first
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ warning_loads | length > 0 }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input warning_loads
+
+          # Wait a bit
+          - delay:
+              seconds: 30
+
+          # Restore critical loads if SOC is good
+          - choose:
+              - conditions:
+                  - condition: numeric_state
+                    entity_id: !input battery_soc_sensor
+                    above: !input critical_soc
+                  - condition: template
+                    value_template: "{{ critical_loads | length > 0 }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input critical_loads
+
+          # Restore emergency loads if SOC is very good
+          - choose:
+              - conditions:
+                  - condition: numeric_state
+                    entity_id: !input battery_soc_sensor
+                    above: !input warning_soc
+                  - condition: template
+                    value_template: "{{ emergency_loads | length > 0 }}"
+                sequence:
+                  - delay:
+                      seconds: 30
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input emergency_loads
+
+          # Notify recovery
+          - service: !input notification_service_1
+            data:
+              title: "✅ Battery Protection: Recovered"
+              message: >
+                Battery SOC recovered to {{ soc }}%.
+                Protection systems normalizing.
+                Loads being restored gradually.
+              data:
+                tag: "srne_battery_warning"
+
+      # Temperature recovered
+      - conditions:
+          - condition: trigger
+            id: "temp_recovered"
+        sequence:
+          # Re-enable charging if safe
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ charging_switch is defined and charging_switch != none }}"
+                  - condition: numeric_state
+                    entity_id: !input battery_temp_sensor
+                    below: !input charge_max_temperature
+                sequence:
+                  - delay:
+                      seconds: 30
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input charging_switch
+
+          # Notify
+          - service: !input notification_service_1
+            data:
+              title: "✅ Temperature Normal"
+              message: >
+                Battery temperature normalized to {{ temp }}°C.
+                Protection systems returning to normal.
+              data:
+                tag: "srne_temp_protection"
+
+mode: queued
+max: 10
+max_exceeded: warning

@@ -1,0 +1,29 @@
+# Simple Low Battery Alert
+# Sends a notification when battery SOC drops below 20%
+#
+# Requirements:
+# - sensor.srne_inverter_battery_soc (Battery State of Charge sensor)
+# - Home Assistant mobile app or notification service configured
+#
+# Usage:
+# 1. Copy this file to your config/automations directory
+# 2. Adjust the threshold (20) to your preferred level
+# 3. Update notification service if needed (default: notify.notify)
+
+automation:
+  - alias: "SRNE: Low Battery Alert"
+    description: "Alert when battery SOC drops below 20%"
+
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.srne_inverter_battery_soc
+        below: 20
+
+    action:
+      - service: notify.notify
+        data:
+          title: "Low Battery Warning"
+          message: "Battery SOC is {{ states('sensor.srne_inverter_battery_soc') }}%. Consider reducing load or switching to grid."
+          data:
+            priority: high
+            tag: "low_battery"

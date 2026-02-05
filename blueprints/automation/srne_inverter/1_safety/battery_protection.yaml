@@ -1,0 +1,256 @@
+blueprint:
+  name: "SRNE Inverter - Battery Protection"
+  description: >
+    Monitors battery health parameters (temperature, SOC, voltage) and takes protective actions
+    when thresholds are exceeded. Prevents battery damage from overheating or deep discharge.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/battery_protection.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    battery_temp_sensor:
+      name: Battery Temperature Sensor
+      description: Battery temperature sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    battery_voltage_sensor:
+      name: Battery Voltage Sensor
+      description: Battery voltage sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: voltage
+
+    priority_select:
+      name: Priority Select Entity
+      description: Energy priority select entity
+      selector:
+        entity:
+          domain: select
+
+    charging_switch:
+      name: Battery Charging Switch (Optional)
+      description: Switch to control battery charging
+      default: {}
+      selector:
+        entity:
+          domain: switch
+
+    critical_soc:
+      name: Critical SOC Level
+      description: Emergency protection when battery drops below this level
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 5
+          unit_of_measurement: "%"
+
+    max_temperature:
+      name: Maximum Temperature
+      description: Protection trigger when temperature exceeds this value
+      default: 45
+      selector:
+        number:
+          min: 35
+          max: 60
+          step: 1
+          unit_of_measurement: "°C"
+
+    min_voltage:
+      name: Minimum Voltage
+      description: Protection trigger when voltage drops below this value
+      default: 44.0
+      selector:
+        number:
+          min: 40.0
+          max: 50.0
+          step: 0.5
+          unit_of_measurement: "V"
+
+    max_voltage:
+      name: Maximum Voltage
+      description: Protection trigger when voltage exceeds this value
+      default: 58.0
+      selector:
+        number:
+          min: 54.0
+          max: 62.0
+          step: 0.5
+          unit_of_measurement: "V"
+
+    safe_mode_priority:
+      name: Safe Mode Priority
+      description: Priority to switch to when protection is triggered
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Utility First"
+            - "Solar First"
+
+    notification_service_1:
+      name: Primary Notification Service
+      description: First notification service (e.g., mobile app)
+      selector:
+        text:
+
+    notification_service_2:
+      name: Secondary Notification Service (Optional)
+      description: Second notification service for redundancy
+      default: ""
+      selector:
+        text:
+
+    disable_charging_on_high_temp:
+      name: Disable Charging on High Temperature
+      description: Automatically stop charging if temperature is too high
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # Critical SOC
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input critical_soc
+    id: "critical_soc"
+
+  # High temperature
+  - platform: numeric_state
+    entity_id: !input battery_temp_sensor
+    above: !input max_temperature
+    id: "high_temp"
+
+  # Low voltage
+  - platform: numeric_state
+    entity_id: !input battery_voltage_sensor
+    below: !input min_voltage
+    id: "low_voltage"
+
+  # High voltage
+  - platform: numeric_state
+    entity_id: !input battery_voltage_sensor
+    above: !input max_voltage
+    id: "high_voltage"
+
+condition: []
+
+action:
+  - variables:
+      soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      temp: "{{ states(battery_temp_sensor) | float(0) }}"
+      voltage: "{{ states(battery_voltage_sensor) | float(0) }}"
+      trigger_id: "{{ trigger.id }}"
+
+  # Determine the issue
+  - variables:
+      issue_type: >
+        {% if trigger_id == 'critical_soc' %}
+          Critical Low Battery
+        {% elif trigger_id == 'high_temp' %}
+          High Temperature
+        {% elif trigger_id == 'low_voltage' %}
+          Low Voltage
+        {% elif trigger_id == 'high_voltage' %}
+          High Voltage
+        {% else %}
+          Unknown
+        {% endif %}
+      issue_message: >
+        {% if trigger_id == 'critical_soc' %}
+          Battery critically low at {{ soc }}%!
+        {% elif trigger_id == 'high_temp' %}
+          Battery temperature critical at {{ temp }}°C!
+        {% elif trigger_id == 'low_voltage' %}
+          Battery voltage critically low at {{ voltage }}V!
+        {% elif trigger_id == 'high_voltage' %}
+          Battery voltage critically high at {{ voltage }}V!
+        {% else %}
+          Unknown battery issue detected!
+        {% endif %}
+
+  # Switch to safe mode
+  - service: select.select_option
+    target:
+      entity_id: !input priority_select
+    data:
+      option: !input safe_mode_priority
+
+  # Disable charging if high temperature
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ disable_charging_on_high_temp }}"
+          - condition: trigger
+            id: "high_temp"
+          - condition: template
+            value_template: "{{ charging_switch is defined and charging_switch != none }}"
+        sequence:
+          - service: switch.turn_off
+            target:
+              entity_id: !input charging_switch
+
+  # Send emergency notifications
+  - service: !input notification_service_1
+    data:
+      title: "⚠️ BATTERY PROTECTION ACTIVATED"
+      message: >
+        {{ issue_type }}: {{ issue_message }}
+
+        Current status:
+        - SOC: {{ soc }}%
+        - Temperature: {{ temp }}°C
+        - Voltage: {{ voltage }}V
+
+        Switched to {{ safe_mode_priority }} for protection.
+      data:
+        priority: high
+        ttl: 0
+        tag: "srne_battery_protection"
+
+  # Optional second notification service
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notification_service_2 | length > 0 }}"
+        sequence:
+          - service: !input notification_service_2
+            data:
+              title: "⚠️ BATTERY PROTECTION ACTIVATED"
+              message: >
+                {{ issue_type }}: {{ issue_message }}
+                Check Home Assistant immediately!
+              data:
+                priority: high
+
+  # Log to system log
+  - service: system_log.write
+    data:
+      message: >
+        SRNE Battery Protection triggered: {{ issue_type }}
+        SOC: {{ soc }}%, Temp: {{ temp }}°C, Voltage: {{ voltage }}V
+      level: warning
+      logger: homeassistant.components.srne_ble_modbus
+
+mode: single
+max_exceeded: silent

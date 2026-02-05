@@ -1,0 +1,58 @@
+# Grid Stability Monitor
+# Monitors grid voltage and frequency for out-of-range conditions
+#
+# Requirements:
+# - sensor.srne_inverter_grid_voltage (Grid voltage sensor)
+# - sensor.srne_inverter_grid_frequency (Grid frequency sensor)
+#
+# Usage:
+# 1. Copy this file to your config/automations directory
+# 2. Adjust voltage range (200-250V for 230V nominal)
+# 3. Adjust frequency range (49-51Hz for 50Hz nominal)
+#
+# Note: Ranges depend on your local grid standards (50Hz vs 60Hz)
+
+automation:
+  - alias: "SRNE: Grid Voltage Out of Range"
+    description: "Alert when grid voltage is unstable"
+
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.srne_inverter_grid_voltage
+        below: 200
+        for:
+          seconds: 30
+
+      - platform: numeric_state
+        entity_id: sensor.srne_inverter_grid_voltage
+        above: 250
+        for:
+          seconds: 30
+
+    action:
+      - service: notify.notify
+        data:
+          title: "Grid Voltage Unstable"
+          message: "Grid voltage is {{ states('sensor.srne_inverter_grid_voltage') }}V (normal: 200-250V)"
+
+  - alias: "SRNE: Grid Frequency Out of Range"
+    description: "Alert when grid frequency is unstable"
+
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.srne_inverter_grid_frequency
+        below: 49
+        for:
+          seconds: 30
+
+      - platform: numeric_state
+        entity_id: sensor.srne_inverter_grid_frequency
+        above: 51
+        for:
+          seconds: 30
+
+    action:
+      - service: notify.notify
+        data:
+          title: "Grid Frequency Unstable"
+          message: "Grid frequency is {{ states('sensor.srne_inverter_grid_frequency') }}Hz (normal: 49-51Hz)"

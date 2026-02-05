@@ -1,0 +1,606 @@
+blueprint:
+  name: "SRNE Inverter - Soft Start Recovery"
+  description: >
+    Controlled restart system after fault conditions that gradually brings the inverter back online
+    with a 60-second voltage ramp and reduced current limits for the first 30 minutes. Prevents
+    damage from inrush currents and allows system stabilization before returning to full power.
+    Includes automatic fault detection and multi-stage recovery process.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/1_safety/soft_start_recovery.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    fault_sensor:
+      name: Fault Detection Sensor
+      description: Binary sensor that indicates fault status
+      selector:
+        entity:
+          domain: binary_sensor
+
+    ac_output_switch:
+      name: AC Output Switch
+      description: Switch to control AC output
+      selector:
+        entity:
+          domain: switch
+
+    output_voltage_number:
+      name: Output Voltage Control (Optional)
+      description: Number entity to control output voltage (if available)
+      default: {}
+      selector:
+        entity:
+          domain: number
+
+    charge_current_number:
+      name: Charge Current Control
+      description: Number entity to control battery charge current
+      selector:
+        entity:
+          domain: number
+
+    discharge_current_number:
+      name: Discharge Current Control (Optional)
+      description: Number entity to control discharge current (if available)
+      default: {}
+      selector:
+        entity:
+          domain: number
+
+    priority_select:
+      name: Energy Priority Select
+      description: Energy priority select entity
+      selector:
+        entity:
+          domain: select
+
+    battery_voltage_sensor:
+      name: Battery Voltage Sensor
+      description: Battery voltage sensor for monitoring
+      selector:
+        entity:
+          domain: sensor
+          device_class: voltage
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    battery_temp_sensor:
+      name: Battery Temperature Sensor (Optional)
+      description: Battery temperature sensor for safety checks
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    # Recovery parameters
+    normal_output_voltage:
+      name: Normal Output Voltage
+      description: Target output voltage (V)
+      default: 230
+      selector:
+        number:
+          min: 200
+          max: 240
+          step: 1
+          unit_of_measurement: "V"
+
+    voltage_ramp_duration:
+      name: Voltage Ramp Duration
+      description: Time to ramp from initial to normal voltage (seconds)
+      default: 60
+      selector:
+        number:
+          min: 30
+          max: 180
+          step: 10
+          unit_of_measurement: "s"
+
+    voltage_ramp_steps:
+      name: Voltage Ramp Steps
+      description: Number of steps in voltage ramp (more = smoother)
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 20
+          step: 1
+
+    initial_voltage_percent:
+      name: Initial Voltage Percentage
+      description: Starting voltage as percentage of normal (%)
+      default: 70
+      selector:
+        number:
+          min: 50
+          max: 90
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    recovery_current_percent:
+      name: Recovery Current Percentage
+      description: Reduced current limit during recovery (% of normal)
+      default: 60
+      selector:
+        number:
+          min: 30
+          max: 80
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    recovery_duration:
+      name: Recovery Period Duration
+      description: Time to maintain reduced current before full power (minutes)
+      default: 30
+      selector:
+        number:
+          min: 15
+          max: 120
+          step: 5
+          unit_of_measurement: "minutes"
+
+    # Normal operating parameters
+    normal_charge_current:
+      name: Normal Charge Current
+      description: Standard charge current (amps)
+      default: 120
+      selector:
+        number:
+          min: 20
+          max: 200
+          step: 5
+          unit_of_measurement: "A"
+
+    normal_discharge_current:
+      name: Normal Discharge Current
+      description: Standard discharge current (amps)
+      default: 100
+      selector:
+        number:
+          min: 20
+          max: 200
+          step: 5
+          unit_of_measurement: "A"
+
+    recovery_priority:
+      name: Recovery Priority Mode
+      description: Priority mode during recovery period
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Utility First"
+            - "Battery First"
+
+    normal_priority:
+      name: Normal Priority Mode
+      description: Priority mode after recovery completes
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Battery First"
+            - "Utility First"
+
+    # Safety checks
+    min_battery_soc:
+      name: Minimum Battery SOC
+      description: Minimum SOC required to start recovery (%)
+      default: 20
+      selector:
+        number:
+          min: 10
+          max: 40
+          step: 5
+          unit_of_measurement: "%"
+
+    max_battery_temp:
+      name: Maximum Battery Temperature
+      description: Skip recovery if temperature exceeds this (°C)
+      default: 45
+      selector:
+        number:
+          min: 35
+          max: 60
+          step: 1
+          unit_of_measurement: "°C"
+
+    min_battery_voltage:
+      name: Minimum Battery Voltage
+      description: Minimum voltage required to start recovery (V)
+      default: 44.0
+      selector:
+        number:
+          min: 40.0
+          max: 50.0
+          step: 0.5
+          unit_of_measurement: "V"
+
+    # Recovery behavior
+    auto_recovery_enabled:
+      name: Enable Automatic Recovery
+      description: Automatically start recovery when fault clears
+      default: true
+      selector:
+        boolean:
+
+    fault_clear_delay:
+      name: Fault Clear Delay
+      description: Wait time after fault clears before starting recovery (seconds)
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 300
+          step: 10
+          unit_of_measurement: "s"
+
+    max_recovery_attempts:
+      name: Maximum Recovery Attempts
+      description: Maximum number of recovery attempts before requiring manual intervention
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+
+    attempt_reset_time:
+      name: Attempt Counter Reset Time
+      description: Reset attempt counter after this many hours of successful operation (hours)
+      default: 24
+      selector:
+        number:
+          min: 6
+          max: 72
+          step: 6
+          unit_of_measurement: "hours"
+
+    # Notifications
+    notification_service:
+      name: Notification Service
+      description: Service for recovery notifications
+      default: ""
+      selector:
+        text:
+
+    notify_on_start:
+      name: Notify on Recovery Start
+      description: Send notification when recovery begins
+      default: true
+      selector:
+        boolean:
+
+    notify_on_complete:
+      name: Notify on Recovery Complete
+      description: Send notification when recovery completes
+      default: true
+      selector:
+        boolean:
+
+    notify_on_failure:
+      name: Notify on Recovery Failure
+      description: Send notification if recovery fails
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # Fault cleared trigger
+  - platform: state
+    entity_id: !input fault_sensor
+    from: "on"
+    to: "off"
+    for:
+      seconds: !input fault_clear_delay
+    id: "fault_cleared"
+
+  # Manual recovery trigger (AC output turned on manually)
+  - platform: state
+    entity_id: !input ac_output_switch
+    to: "on"
+    id: "manual_start"
+
+condition: []
+
+action:
+  - variables:
+      battery_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      battery_voltage: "{{ states(battery_voltage_sensor) | float(0) }}"
+      battery_temp: >
+        {% if battery_temp_sensor is defined and battery_temp_sensor != none %}
+          {{ states(battery_temp_sensor) | float(25) }}
+        {% else %}
+          25
+        {% endif %}
+      min_soc: !input min_battery_soc
+      max_temp: !input max_battery_temp
+      min_voltage: !input min_battery_voltage
+      auto_recovery: !input auto_recovery_enabled
+      normal_voltage: !input normal_output_voltage
+      initial_voltage_pct: !input initial_voltage_percent
+      ramp_duration: !input voltage_ramp_duration
+      ramp_steps: !input voltage_ramp_steps
+      recovery_current_pct: !input recovery_current_percent
+      normal_charge: !input normal_charge_current
+      normal_discharge: !input normal_discharge_current
+
+  # Check if recovery should proceed
+  - variables:
+      safety_checks_passed: >
+        {{ battery_soc >= min_soc and
+           battery_voltage >= min_voltage and
+           battery_temp <= max_temp }}
+
+      skip_reason: >
+        {% if battery_soc < min_soc %}
+          Battery SOC too low ({{ battery_soc }}% < {{ min_soc }}%)
+        {% elif battery_voltage < min_voltage %}
+          Battery voltage too low ({{ battery_voltage }}V < {{ min_voltage }}V)
+        {% elif battery_temp > max_temp %}
+          Battery temperature too high ({{ battery_temp }}°C > {{ max_temp }}°C)
+        {% else %}
+          Unknown
+        {% endif %}
+
+      should_proceed: >
+        {{ (trigger.id == 'fault_cleared' and auto_recovery and safety_checks_passed) or
+           (trigger.id == 'manual_start' and safety_checks_passed) }}
+
+  - choose:
+      # PROCEED WITH RECOVERY
+      - conditions:
+          - condition: template
+            value_template: "{{ should_proceed }}"
+        sequence:
+          # Log recovery start
+          - service: system_log.write
+            data:
+              message: >
+                Soft Start Recovery: Initiating recovery sequence
+                Battery: {{ battery_soc }}% / {{ battery_voltage }}V / {{ battery_temp }}°C
+                Trigger: {{ 'Automatic' if trigger.id == 'fault_cleared' else 'Manual' }}
+              level: warning
+              logger: homeassistant.components.srne_ble_modbus.recovery
+
+          # Notification - recovery starting
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_start and notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "🔄 Soft Start Recovery Initiated"
+                      message: >
+                        Inverter recovery sequence starting
+
+                        Battery SOC: {{ battery_soc }}%
+                        Battery Voltage: {{ battery_voltage }}V
+                        Recovery will take {{ (recovery_duration + (ramp_duration / 60)) | round(0) }} minutes
+
+                        System will operate at reduced power during recovery.
+                      data:
+                        tag: "srne_recovery"
+                        priority: high
+
+          # PHASE 1: Pre-start checks and configuration
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input recovery_priority
+
+          # Set reduced currents
+          - variables:
+              recovery_charge_current: "{{ (normal_charge * recovery_current_pct / 100) | round(0) }}"
+              recovery_discharge_current: "{{ (normal_discharge * recovery_current_pct / 100) | round(0) }}"
+
+          - service: number.set_value
+            target:
+              entity_id: !input charge_current_number
+            data:
+              value: "{{ recovery_charge_current }}"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ discharge_current_number is defined and discharge_current_number != none }}"
+                sequence:
+                  - service: number.set_value
+                    target:
+                      entity_id: !input discharge_current_number
+                    data:
+                      value: "{{ recovery_discharge_current }}"
+
+          # PHASE 2: Voltage ramp (if voltage control available)
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ output_voltage_number is defined and output_voltage_number != none }}"
+                sequence:
+                  - variables:
+                      initial_voltage: "{{ (normal_voltage * initial_voltage_pct / 100) | round(0) }}"
+                      voltage_step: "{{ ((normal_voltage - initial_voltage) / ramp_steps) | round(1) }}"
+                      step_delay: "{{ (ramp_duration / ramp_steps) | round(1) }}"
+
+                  # Set initial voltage
+                  - service: number.set_value
+                    target:
+                      entity_id: !input output_voltage_number
+                    data:
+                      value: "{{ initial_voltage }}"
+
+                  - delay:
+                      seconds: 5
+
+                  # Enable AC output
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input ac_output_switch
+
+                  - service: system_log.write
+                    data:
+                      message: >
+                        Recovery Phase 2: Voltage ramp starting
+                        Initial: {{ initial_voltage }}V, Target: {{ normal_voltage }}V
+                      level: info
+                      logger: homeassistant.components.srne_ble_modbus.recovery
+
+                  # Ramp voltage in steps
+                  - repeat:
+                      count: "{{ ramp_steps }}"
+                      sequence:
+                        - variables:
+                            current_step: "{{ repeat.index }}"
+                            target_voltage: "{{ (initial_voltage + (voltage_step * current_step)) | round(0) | min(normal_voltage) }}"
+
+                        - service: number.set_value
+                          target:
+                            entity_id: !input output_voltage_number
+                          data:
+                            value: "{{ target_voltage }}"
+
+                        - delay:
+                            seconds: "{{ step_delay }}"
+
+                  # Ensure final voltage is set
+                  - service: number.set_value
+                    target:
+                      entity_id: !input output_voltage_number
+                    data:
+                      value: "{{ normal_voltage }}"
+
+            # If no voltage control, just enable output
+            default:
+              - service: switch.turn_on
+                target:
+                  entity_id: !input ac_output_switch
+
+          - service: system_log.write
+            data:
+              message: >
+                Recovery Phase 2 Complete: AC output enabled
+                Operating at {{ recovery_current_pct }}% current for {{ recovery_duration }} minutes
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.recovery
+
+          # PHASE 3: Recovery period with reduced current
+          - delay:
+              minutes: !input recovery_duration
+
+          # Check if system is still stable
+          - condition: state
+            entity_id: !input fault_sensor
+            state: "off"
+
+          - condition: state
+            entity_id: !input ac_output_switch
+            state: "on"
+
+          # PHASE 4: Restore normal operation
+          - service: number.set_value
+            target:
+              entity_id: !input charge_current_number
+            data:
+              value: "{{ normal_charge }}"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ discharge_current_number is defined and discharge_current_number != none }}"
+                sequence:
+                  - service: number.set_value
+                    target:
+                      entity_id: !input discharge_current_number
+                    data:
+                      value: "{{ normal_discharge }}"
+
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input normal_priority
+
+          - service: system_log.write
+            data:
+              message: >
+                Soft Start Recovery: COMPLETE
+                System restored to normal operation
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.recovery
+
+          # Notification - recovery complete
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_complete and notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "✅ Recovery Complete"
+                      message: >
+                        Soft start recovery completed successfully
+
+                        System operating normally:
+                        - Full power restored
+                        - Priority: {{ normal_priority }}
+                        - Battery: {{ states(battery_soc_sensor) }}%
+
+                        All systems operational.
+                      data:
+                        tag: "srne_recovery"
+
+      # SKIP RECOVERY - Safety checks failed
+      - conditions: []
+        sequence:
+          - service: system_log.write
+            data:
+              message: >
+                Soft Start Recovery: SKIPPED
+                Reason: {{ skip_reason }}
+              level: warning
+              logger: homeassistant.components.srne_ble_modbus.recovery
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_failure and notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "⚠️ Recovery Skipped"
+                      message: >
+                        Automatic recovery cannot proceed
+
+                        Reason: {{ skip_reason }}
+
+                        Current conditions:
+                        - Battery SOC: {{ battery_soc }}%
+                        - Battery Voltage: {{ battery_voltage }}V
+                        - Temperature: {{ battery_temp }}°C
+
+                        Manual intervention may be required.
+                      data:
+                        tag: "srne_recovery"
+                        priority: high
+
+mode: single
+max_exceeded: silent

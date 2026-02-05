@@ -1,0 +1,471 @@
+blueprint:
+  name: "SRNE Inverter - Smart Night Charging"
+  description: >
+    Optimizes battery charging during off-peak electricity hours, typically overnight when
+    rates are lowest. Automatically switches between AC and PV charging priorities based
+    on time of day and battery state.
+
+    Features:
+    - Scheduled AC charging during off-peak hours (default 11 PM - 7 AM)
+    - Configurable charge current limits
+    - Minimum SOC threshold to avoid unnecessary charging
+    - Automatic switch to PV priority during daytime
+    - Smart pre-charging before peak hours
+    - Optional weather-aware scheduling
+
+    Ideal for time-of-use (TOU) electricity pricing to minimize energy costs.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/2_optimization/smart_night_charging.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_inverter
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    # Time Configuration
+    off_peak_start_time:
+      name: Off-Peak Start Time
+      description: When off-peak electricity pricing begins
+      default: "23:00:00"
+      selector:
+        time:
+
+    off_peak_end_time:
+      name: Off-Peak End Time
+      description: When off-peak electricity pricing ends
+      default: "07:00:00"
+      selector:
+        time:
+
+    # Charging Parameters
+    min_soc_threshold:
+      name: Minimum SOC Threshold
+      description: Only charge if battery below this level
+      default: 80
+      selector:
+        number:
+          min: 50
+          max: 95
+          step: 5
+          unit_of_measurement: "%"
+
+    target_soc:
+      name: Target SOC
+      description: Charge battery to this level during off-peak hours
+      default: 100
+      selector:
+        number:
+          min: 80
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+
+    ac_charge_current:
+      name: AC Charge Current
+      description: Maximum current for AC charging during off-peak hours
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 60
+          step: 5
+          unit_of_measurement: "A"
+
+    # Control Entities
+    charge_source_priority:
+      name: Charge Source Priority Select
+      description: Entity to control charge source priority
+      selector:
+        entity:
+          domain: select
+
+    max_ac_charge_current:
+      name: Max AC Charge Current Number
+      description: Entity to set AC charge current limit
+      selector:
+        entity:
+          domain: number
+
+    output_priority:
+      name: Output Priority Select (Optional)
+      description: Entity to control output priority (if separate from charge source)
+      default: {}
+      selector:
+        entity:
+          domain: select
+
+    # Advanced Options
+    enable_smart_precharge:
+      name: Enable Smart Pre-Charge
+      description: Start charging before off-peak if battery critically low
+      default: true
+      selector:
+        boolean:
+
+    precharge_soc_threshold:
+      name: Pre-Charge SOC Threshold
+      description: Start immediate charging if battery drops below this
+      default: 20
+      selector:
+        number:
+          min: 10
+          max: 40
+          step: 5
+          unit_of_measurement: "%"
+
+    daytime_priority:
+      name: Daytime Priority Mode
+      description: Priority mode during daytime (after off-peak ends)
+      default: "PV Priority"
+      selector:
+        select:
+          options:
+            - "PV Priority"
+            - "Solar First"
+            - "Battery First"
+
+    nighttime_priority:
+      name: Nighttime Priority Mode
+      description: Priority mode during off-peak charging
+      default: "AC Priority"
+      selector:
+        select:
+          options:
+            - "AC Priority"
+            - "Utility First"
+
+    # Weather Integration (Optional)
+    weather_entity:
+      name: Weather Entity (Optional)
+      description: Weather forecast to adjust charging strategy
+      default: {}
+      selector:
+        entity:
+          domain: weather
+
+    adjust_for_weather:
+      name: Adjust for Weather Forecast
+      description: Reduce target SOC if sunny weather forecast for next day
+      default: false
+      selector:
+        boolean:
+
+    sunny_weather_target_soc:
+      name: Sunny Weather Target SOC
+      description: Reduced target SOC when sunny weather expected
+      default: 85
+      selector:
+        number:
+          min: 70
+          max: 95
+          step: 5
+          unit_of_measurement: "%"
+
+    # Notifications
+    notification_service:
+      name: Notification Service (Optional)
+      description: Service for charging status updates
+      default: ""
+      selector:
+        text:
+
+    notify_on_charge_start:
+      name: Notify on Charge Start
+      description: Send notification when night charging begins
+      default: false
+      selector:
+        boolean:
+
+    notify_on_charge_complete:
+      name: Notify on Charge Complete
+      description: Send notification when target SOC reached
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # Off-peak period starts
+  - platform: time
+    at: !input off_peak_start_time
+    id: "off_peak_start"
+
+  # Off-peak period ends
+  - platform: time
+    at: !input off_peak_end_time
+    id: "off_peak_end"
+
+  # Battery reaches target SOC during charging
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    above: !input target_soc
+    id: "target_reached"
+
+  # Emergency pre-charge trigger
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input precharge_soc_threshold
+    id: "emergency_precharge"
+
+condition: []
+
+action:
+  - variables:
+      soc: "{{ states(battery_soc_sensor) | float(50) }}"
+      current_time: "{{ now().strftime('%H:%M:%S') }}"
+      off_peak_start: !input off_peak_start_time
+      off_peak_end: !input off_peak_end_time
+      min_soc: !input min_soc_threshold
+      target: !input target_soc
+      charge_current: !input ac_charge_current
+      trigger_id: "{{ trigger.id }}"
+      timestamp: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      is_off_peak: >
+        {% set now_time = current_time %}
+        {% set start = off_peak_start %}
+        {% set end = off_peak_end %}
+        {% if start > end %}
+          {{ now_time >= start or now_time < end }}
+        {% else %}
+          {{ start <= now_time < end }}
+        {% endif %}
+
+  # Check weather forecast if enabled
+  - variables:
+      weather_forecast: >
+        {% if adjust_for_weather and weather_entity is defined and weather_entity != none %}
+          {{ state_attr(weather_entity, 'forecast')[0].condition if state_attr(weather_entity, 'forecast') else 'unknown' }}
+        {% else %}
+          unknown
+        {% endif %}
+      is_sunny_forecast: >
+        {{ weather_forecast in ['sunny', 'partlycloudy', 'clear'] }}
+      effective_target_soc: >
+        {% if is_sunny_forecast and adjust_for_weather %}
+          {{ sunny_weather_target_soc }}
+        {% else %}
+          {{ target }}
+        {% endif %}
+
+  - choose:
+      # ==========================================
+      # OFF-PEAK CHARGING START
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "off_peak_start"
+          # Only charge if battery below minimum threshold
+          - condition: numeric_state
+            entity_id: !input battery_soc_sensor
+            below: !input min_soc_threshold
+        sequence:
+          # Set AC charge priority
+          - service: select.select_option
+            target:
+              entity_id: !input charge_source_priority
+            data:
+              option: !input nighttime_priority
+
+          # Set charge current limit
+          - service: number.set_value
+            target:
+              entity_id: !input max_ac_charge_current
+            data:
+              value: !input ac_charge_current
+
+          # Set output priority if available
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ output_priority is defined and output_priority != none }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input output_priority
+                    data:
+                      option: !input nighttime_priority
+
+          # Optional notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_charge_start }}"
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "🔋 Night Charging Started"
+                      message: >
+                        Off-peak charging activated at {{ timestamp }}.
+
+                        Configuration:
+                        - Current SOC: {{ soc }}%
+                        - Target SOC: {{ effective_target_soc }}%
+                        - Charge Current: {{ charge_current }}A
+                        - Priority: {{ nighttime_priority }}
+                        {% if is_sunny_forecast %}
+                        - Weather: Sunny forecast - reduced target
+                        {% endif %}
+                      data:
+                        tag: "srne_night_charging"
+
+          # Log charging start
+          - service: system_log.write
+            data:
+              message: >
+                Smart Night Charging: Started at {{ timestamp }}, SOC {{ soc }}%, target {{ effective_target_soc }}%
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # OFF-PEAK CHARGING END
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "off_peak_end"
+        sequence:
+          # Switch to daytime PV priority
+          - service: select.select_option
+            target:
+              entity_id: !input charge_source_priority
+            data:
+              option: !input daytime_priority
+
+          # Reduce AC charge current for daytime (allow PV priority)
+          - service: number.set_value
+            target:
+              entity_id: !input max_ac_charge_current
+            data:
+              value: 10
+
+          # Set output priority if available
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ output_priority is defined and output_priority != none }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input output_priority
+                    data:
+                      option: !input daytime_priority
+
+          # Log mode switch
+          - service: system_log.write
+            data:
+              message: >
+                Smart Night Charging: Switched to {{ daytime_priority }} at {{ timestamp }}, final SOC {{ soc }}%
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # TARGET SOC REACHED
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "target_reached"
+          # Only act if we're in off-peak period
+          - condition: template
+            value_template: "{{ is_off_peak }}"
+        sequence:
+          # Switch to lower maintenance charging
+          - service: number.set_value
+            target:
+              entity_id: !input max_ac_charge_current
+            data:
+              value: 5
+
+          # Optional notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_charge_complete }}"
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "✅ Target SOC Reached"
+                      message: >
+                        Battery charged to {{ soc }}% at {{ timestamp }}.
+
+                        Target: {{ effective_target_soc }}%
+                        Charge current reduced to maintenance level.
+                      data:
+                        tag: "srne_night_charging"
+
+          # Log completion
+          - service: system_log.write
+            data:
+              message: >
+                Smart Night Charging: Target {{ effective_target_soc }}% reached at {{ timestamp }}
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # EMERGENCY PRE-CHARGE
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "emergency_precharge"
+          - condition: template
+            value_template: "{{ enable_smart_precharge }}"
+          # Only if not already in off-peak period
+          - condition: template
+            value_template: "{{ not is_off_peak }}"
+        sequence:
+          # Enable immediate AC charging
+          - service: select.select_option
+            target:
+              entity_id: !input charge_source_priority
+            data:
+              option: "AC Priority"
+
+          # Set moderate charge current
+          - service: number.set_value
+            target:
+              entity_id: !input max_ac_charge_current
+            data:
+              value: >
+                {{ [charge_current * 0.7, 20] | max | int }}
+
+          # Send alert notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "⚡ Emergency Pre-Charge Activated"
+                      message: >
+                        Battery critically low at {{ soc }}%!
+
+                        Emergency charging started at {{ timestamp }}.
+                        Will optimize during next off-peak period.
+                      data:
+                        priority: high
+                        tag: "srne_emergency_charge"
+
+          # Log emergency charge
+          - service: system_log.write
+            data:
+              message: >
+                Smart Night Charging: Emergency pre-charge activated at {{ soc }}%
+              level: warning
+              logger: homeassistant.components.srne_inverter
+
+mode: single
+max_exceeded: silent

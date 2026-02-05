@@ -1,0 +1,838 @@
+blueprint:
+  name: "SRNE Inverter - Grid Disconnection Handler"
+  description: >
+    Comprehensive grid failure detection and recovery automation with intelligent islanding
+    operation, progressive load shedding, and safe grid restoration with soft-start.
+
+    This is an enhanced version of grid_failure_detection.yaml that adds:
+    - Automatic off-grid mode preparation
+    - Progressive load shedding with priority levels
+    - Grid quality monitoring during restoration
+    - Soft-start sequence to prevent inrush
+    - Load restoration with delay sequencing
+    - Frequency-based grid stability verification
+
+    Features:
+    - Multi-stage voltage monitoring (failure/critical/restored)
+    - Progressive 3-stage load shedding (warning/critical/emergency)
+    - Grid quality verification before restoration
+    - Configurable restoration delays and soft-start
+    - Load priority management
+    - Comprehensive status notifications
+    - Coordination with battery protection systems
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/1_safety/grid_disconnection_handler.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_inverter
+
+    grid_voltage_sensor:
+      name: Grid Voltage Sensor
+      description: Grid voltage sensor (AC input voltage)
+      selector:
+        entity:
+          domain: sensor
+          device_class: voltage
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    grid_frequency_sensor:
+      name: Grid Frequency Sensor (Optional)
+      description: Grid frequency for stability verification
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    # Voltage Thresholds
+    grid_voltage_warning:
+      name: Grid Voltage Warning Level
+      description: Voltage below this triggers warning (prepare for failure)
+      default: 150
+      selector:
+        number:
+          min: 100
+          max: 200
+          step: 10
+          unit_of_measurement: "V"
+
+    grid_voltage_critical:
+      name: Grid Voltage Critical Level
+      description: Voltage below this indicates grid failure
+      default: 100
+      selector:
+        number:
+          min: 50
+          max: 150
+          step: 10
+          unit_of_measurement: "V"
+
+    grid_restore_threshold:
+      name: Grid Restore Threshold
+      description: Voltage above this indicates grid restored
+      default: 200
+      selector:
+        number:
+          min: 180
+          max: 250
+          step: 10
+          unit_of_measurement: "V"
+
+    grid_restore_stable_threshold:
+      name: Grid Stable Threshold
+      description: Voltage indicating fully stable grid for load restoration
+      default: 220
+      selector:
+        number:
+          min: 200
+          max: 240
+          step: 5
+          unit_of_measurement: "V"
+
+    # Frequency Thresholds (for restoration)
+    frequency_min_threshold:
+      name: Minimum Frequency Threshold
+      description: Grid frequency must be above this for restoration
+      default: 49.5
+      selector:
+        number:
+          min: 48.0
+          max: 49.9
+          step: 0.1
+          unit_of_measurement: "Hz"
+
+    frequency_max_threshold:
+      name: Maximum Frequency Threshold
+      description: Grid frequency must be below this for restoration
+      default: 50.5
+      selector:
+        number:
+          min: 50.1
+          max: 52.0
+          step: 0.1
+          unit_of_measurement: "Hz"
+
+    # Load Shedding Configuration
+    warning_loads:
+      name: Warning Level Loads (Optional)
+      description: First loads to shed when grid voltage low
+      default: []
+      selector:
+        entity:
+          domain: switch
+          multiple: true
+
+    critical_loads:
+      name: Critical Level Loads (Optional)
+      description: Additional loads to shed on grid failure
+      default: []
+      selector:
+        entity:
+          domain: switch
+          multiple: true
+
+    emergency_loads:
+      name: Emergency Level Loads (Optional)
+      description: Final loads to shed if battery critically low
+      default: []
+      selector:
+        entity:
+          domain: switch
+          multiple: true
+
+    essential_loads:
+      name: Essential Loads (Optional)
+      description: Loads that should never be shed (e.g., security, communications)
+      default: []
+      selector:
+        entity:
+          domain: switch
+          multiple: true
+
+    # Priority Configuration
+    priority_select:
+      name: Priority Select Entity
+      description: Energy priority control
+      selector:
+        entity:
+          domain: select
+
+    grid_failure_priority:
+      name: Grid Failure Priority
+      description: Priority mode during grid failure (off-grid mode)
+      default: "Battery First"
+      selector:
+        select:
+          options:
+            - "Battery First"
+            - "Solar First"
+
+    normal_priority:
+      name: Normal Priority
+      description: Priority mode to restore when grid returns
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Utility First"
+            - "PV Priority"
+
+    # Battery Management
+    minimum_battery_soc:
+      name: Minimum Battery SOC Warning
+      description: Warn if battery drops below this during grid failure
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 50
+          step: 5
+          unit_of_measurement: "%"
+
+    emergency_battery_soc:
+      name: Emergency Battery SOC
+      description: Shed emergency loads if battery drops below this
+      default: 20
+      selector:
+        number:
+          min: 10
+          max: 30
+          step: 5
+          unit_of_measurement: "%"
+
+    # Timing Configuration
+    grid_failure_hysteresis:
+      name: Grid Failure Detection Delay
+      description: Voltage must be low for this duration to confirm failure
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 120
+          step: 10
+          unit_of_measurement: "seconds"
+
+    grid_restore_hysteresis:
+      name: Grid Restore Detection Delay
+      description: Voltage must be stable for this duration to confirm restore
+      default: 60
+      selector:
+        number:
+          min: 30
+          max: 300
+          step: 30
+          unit_of_measurement: "seconds"
+
+    grid_stabilization_delay:
+      name: Grid Stabilization Delay
+      description: Additional delay before restoring loads (soft-start)
+      default: 120
+      selector:
+        number:
+          min: 30
+          max: 300
+          step: 30
+          unit_of_measurement: "seconds"
+
+    load_shedding_delay:
+      name: Load Shedding Delay
+      description: Wait time before shedding loads after grid failure
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 5
+          unit_of_measurement: "minutes"
+
+    load_restoration_delay:
+      name: Load Restoration Delay Between Groups
+      description: Delay between restoring each load group (prevent inrush)
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 120
+          step: 10
+          unit_of_measurement: "seconds"
+
+    # Advanced Options
+    enable_progressive_shedding:
+      name: Enable Progressive Load Shedding
+      description: Gradually shed loads based on grid voltage and battery SOC
+      default: true
+      selector:
+        boolean:
+
+    enable_grid_quality_check:
+      name: Enable Grid Quality Check
+      description: Verify grid frequency before restoration
+      default: true
+      selector:
+        boolean:
+
+    enable_soft_start:
+      name: Enable Soft-Start Restoration
+      description: Gradually restore loads with delays to prevent inrush
+      default: true
+      selector:
+        boolean:
+
+    auto_resync_grid:
+      name: Auto Re-sync to Grid
+      description: Automatically switch back to grid when restored
+      default: true
+      selector:
+        boolean:
+
+    # Notifications
+    notification_service:
+      name: Notification Service
+      description: Service for grid failure alerts
+      selector:
+        text:
+
+    notification_service_critical:
+      name: Critical Notification Service (Optional)
+      description: Secondary service for critical alerts
+      default: ""
+      selector:
+        text:
+
+    notify_warning_level:
+      name: Notify on Warning Level
+      description: Send notification when grid voltage drops to warning level
+      default: true
+      selector:
+        boolean:
+
+    notify_load_shedding:
+      name: Notify Load Shedding Events
+      description: Send notifications for each load shedding stage
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # Grid voltage warning
+  - platform: numeric_state
+    entity_id: !input grid_voltage_sensor
+    below: !input grid_voltage_warning
+    above: !input grid_voltage_critical
+    for:
+      seconds: !input grid_failure_hysteresis
+    id: "grid_voltage_warning"
+
+  # Grid failure detected
+  - platform: numeric_state
+    entity_id: !input grid_voltage_sensor
+    below: !input grid_voltage_critical
+    for:
+      seconds: !input grid_failure_hysteresis
+    id: "grid_failure"
+
+  # Grid restored (initial)
+  - platform: numeric_state
+    entity_id: !input grid_voltage_sensor
+    above: !input grid_restore_threshold
+    for:
+      seconds: !input grid_restore_hysteresis
+    id: "grid_restore_initial"
+
+  # Grid fully stable
+  - platform: numeric_state
+    entity_id: !input grid_voltage_sensor
+    above: !input grid_restore_stable_threshold
+    for:
+      seconds: !input grid_stabilization_delay
+    id: "grid_stable"
+
+  # Low battery during grid failure
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input minimum_battery_soc
+    id: "low_battery_warning"
+
+  # Emergency low battery
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input emergency_battery_soc
+    id: "emergency_battery"
+
+condition: []
+
+action:
+  - variables:
+      grid_voltage: "{{ states(grid_voltage_sensor) | float(0) }}"
+      battery_soc: "{{ states(battery_soc_sensor) | float(50) }}"
+      grid_freq: >
+        {% if grid_frequency_sensor is defined and grid_frequency_sensor != none %}
+          {{ states(grid_frequency_sensor) | float(50.0) }}
+        {% else %}
+          50.0
+        {% endif %}
+      timestamp: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      trigger_id: "{{ trigger.id }}"
+      progressive_shed: !input enable_progressive_shedding
+      quality_check: !input enable_grid_quality_check
+      soft_start: !input enable_soft_start
+      auto_sync: !input auto_resync_grid
+
+  - choose:
+      # ==========================================
+      # GRID VOLTAGE WARNING
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "grid_voltage_warning"
+        sequence:
+          # Prepare for possible grid failure
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_warning_level }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "⚠️ Grid Voltage Low"
+                      message: >
+                        Grid voltage dropped to {{ grid_voltage }}V.
+                        Preparing for possible grid failure.
+
+                        Status:
+                        - Battery SOC: {{ battery_soc }}%
+                        - Time: {{ timestamp }}
+
+                        System ready for off-grid operation if needed.
+                      data:
+                        tag: "srne_grid_warning"
+
+          # Log warning
+          - service: system_log.write
+            data:
+              message: >
+                Grid Disconnection Handler: Warning - voltage {{ grid_voltage }}V
+              level: warning
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # GRID FAILURE DETECTED
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "grid_failure"
+        sequence:
+          # Immediately switch to off-grid priority
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input grid_failure_priority
+
+          # Send critical notification
+          - service: !input notification_service
+            data:
+              title: "🔴 GRID FAILURE DETECTED"
+              message: >
+                Grid power lost at {{ timestamp }}!
+
+                Status:
+                - Grid Voltage: {{ grid_voltage }}V
+                - Battery SOC: {{ battery_soc }}%
+                - Mode: Off-Grid ({{ grid_failure_priority }})
+
+                {% if progressive_shed %}
+                Progressive load shedding will begin in {{ load_shedding_delay }} minutes.
+                {% endif %}
+
+                System operating from battery and solar.
+              data:
+                priority: high
+                ttl: 0
+                tag: "srne_grid_failure"
+
+          # Critical notification to secondary service
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service_critical | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_critical
+                    data:
+                      title: "🔴 GRID FAILURE"
+                      message: "Grid power lost! Battery: {{ battery_soc }}%"
+
+          # Log critical event
+          - service: system_log.write
+            data:
+              message: >
+                Grid Disconnection Handler: FAILURE detected - voltage {{ grid_voltage }}V, SOC {{ battery_soc }}%
+              level: error
+              logger: homeassistant.components.srne_inverter
+
+          # Progressive load shedding if enabled
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ progressive_shed }}"
+                sequence:
+                  # Wait before starting load shedding
+                  - delay:
+                      minutes: !input load_shedding_delay
+
+                  # Verify grid still down
+                  - condition: numeric_state
+                    entity_id: !input grid_voltage_sensor
+                    below: !input grid_voltage_critical
+
+                  # Stage 1: Shed warning loads
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ warning_loads | length > 0 }}"
+                        sequence:
+                          - service: switch.turn_off
+                            target:
+                              entity_id: !input warning_loads
+
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: "{{ notify_load_shedding }}"
+                                sequence:
+                                  - service: !input notification_service
+                                    data:
+                                      title: "🔌 Load Shedding: Stage 1"
+                                      message: "Non-essential loads disabled to conserve battery."
+                                      data:
+                                        tag: "srne_load_shedding"
+
+                  # Wait between stages
+                  - delay:
+                      seconds: 30
+
+                  # Stage 2: Shed critical loads if still needed
+                  - choose:
+                      - conditions:
+                          - condition: numeric_state
+                            entity_id: !input grid_voltage_sensor
+                            below: !input grid_voltage_critical
+                          - condition: template
+                            value_template: "{{ critical_loads | length > 0 }}"
+                        sequence:
+                          - service: switch.turn_off
+                            target:
+                              entity_id: !input critical_loads
+
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: "{{ notify_load_shedding }}"
+                                sequence:
+                                  - service: !input notification_service
+                                    data:
+                                      title: "🔌 Load Shedding: Stage 2"
+                                      message: "Additional loads shed. Essential systems only."
+                                      data:
+                                        tag: "srne_load_shedding"
+
+      # ==========================================
+      # LOW BATTERY DURING GRID FAILURE
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "low_battery_warning"
+          # Only act if grid is still down
+          - condition: numeric_state
+            entity_id: !input grid_voltage_sensor
+            below: !input grid_voltage_critical
+        sequence:
+          - service: !input notification_service
+            data:
+              title: "🔋 LOW BATTERY - Grid Still Down"
+              message: >
+                Battery at {{ battery_soc }}% during grid failure!
+                Grid voltage: {{ grid_voltage }}V
+
+                ⚠️ Consider:
+                - Reducing load consumption
+                - Preparing backup power
+                - Extending battery runtime
+
+                Power loss possible if grid doesn't restore soon.
+              data:
+                priority: high
+                ttl: 0
+                tag: "srne_low_battery_grid_down"
+
+          # Log warning
+          - service: system_log.write
+            data:
+              message: >
+                Grid Disconnection Handler: Low battery {{ battery_soc }}% during grid failure
+              level: warning
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # EMERGENCY LOW BATTERY
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "emergency_battery"
+          - condition: numeric_state
+            entity_id: !input grid_voltage_sensor
+            below: !input grid_voltage_critical
+        sequence:
+          # Shed emergency loads
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ emergency_loads | length > 0 }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input emergency_loads
+
+          # Critical notification
+          - service: !input notification_service
+            data:
+              title: "🆘 EMERGENCY - Critical Battery"
+              message: >
+                CRITICAL: Battery at {{ battery_soc }}%!
+                Grid still down ({{ grid_voltage }}V).
+
+                Emergency load shedding activated.
+                Essential systems only.
+
+                POWER LOSS IMMINENT!
+              data:
+                priority: high
+                ttl: 0
+                tag: "srne_emergency_battery"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service_critical | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_critical
+                    data:
+                      title: "🆘 CRITICAL: {{ battery_soc }}%"
+                      message: "Battery critical! Grid down!"
+
+          # Log critical
+          - service: system_log.write
+            data:
+              message: >
+                Grid Disconnection Handler: EMERGENCY - battery {{ battery_soc }}%, grid still down
+              level: critical
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # GRID RESTORE INITIAL
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "grid_restore_initial"
+        sequence:
+          # Check grid quality if enabled
+          - variables:
+              grid_quality_ok: >
+                {% if quality_check and grid_frequency_sensor is defined and grid_frequency_sensor != none %}
+                  {% set freq = states(grid_frequency_sensor) | float(50.0) %}
+                  {{ frequency_min_threshold <= freq <= frequency_max_threshold }}
+                {% else %}
+                  true
+                {% endif %}
+
+          # Notify initial restore
+          - service: !input notification_service
+            data:
+              title: "🟡 Grid Power Returning"
+              message: >
+                Grid voltage restored to {{ grid_voltage }}V at {{ timestamp }}.
+
+                Status:
+                - Battery SOC: {{ battery_soc }}%
+                {% if quality_check %}
+                - Grid Frequency: {{ grid_freq }}Hz
+                - Grid Quality: {{ 'OK' if grid_quality_ok else 'UNSTABLE' }}
+                {% endif %}
+
+                {% if grid_quality_ok %}
+                Monitoring grid stability before full restoration...
+                {% else %}
+                Grid unstable - waiting for stabilization...
+                {% endif %}
+              data:
+                tag: "srne_grid_failure"
+
+          # Log restore detection
+          - service: system_log.write
+            data:
+              message: >
+                Grid Disconnection Handler: Grid returning - voltage {{ grid_voltage }}V, freq {{ grid_freq }}Hz
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # GRID FULLY STABLE - RESTORE OPERATION
+      # ==========================================
+      - conditions:
+          - condition: trigger
+            id: "grid_stable"
+        sequence:
+          # Verify grid quality one more time
+          - variables:
+              grid_quality_verified: >
+                {% if quality_check and grid_frequency_sensor is defined and grid_frequency_sensor != none %}
+                  {% set freq = states(grid_frequency_sensor) | float(50.0) %}
+                  {{ frequency_min_threshold <= freq <= frequency_max_threshold }}
+                {% else %}
+                  true
+                {% endif %}
+
+          # Only proceed if grid quality verified
+          - condition: template
+            value_template: "{{ grid_quality_verified }}"
+
+          # Switch back to grid priority if auto-sync enabled
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ auto_sync }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input priority_select
+                    data:
+                      option: !input normal_priority
+
+          # Soft-start load restoration
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ soft_start }}"
+                sequence:
+                  # Stage 1: Restore essential loads first
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ essential_loads | length > 0 }}"
+                        sequence:
+                          - service: switch.turn_on
+                            target:
+                              entity_id: !input essential_loads
+                          - delay:
+                              seconds: !input load_restoration_delay
+
+                  # Stage 2: Restore warning loads
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ warning_loads | length > 0 }}"
+                        sequence:
+                          - service: switch.turn_on
+                            target:
+                              entity_id: !input warning_loads
+                          - delay:
+                              seconds: !input load_restoration_delay
+
+                  # Stage 3: Restore critical loads
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ critical_loads | length > 0 }}"
+                        sequence:
+                          - service: switch.turn_on
+                            target:
+                              entity_id: !input critical_loads
+                          - delay:
+                              seconds: !input load_restoration_delay
+
+                  # Stage 4: Restore emergency loads
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ emergency_loads | length > 0 }}"
+                        sequence:
+                          - service: switch.turn_on
+                            target:
+                              entity_id: !input emergency_loads
+
+            # Simple restore if soft-start disabled
+            default:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ warning_loads | length > 0 }}"
+                    sequence:
+                      - service: switch.turn_on
+                        target:
+                          entity_id: !input warning_loads
+
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ critical_loads | length > 0 }}"
+                    sequence:
+                      - service: switch.turn_on
+                        target:
+                          entity_id: !input critical_loads
+
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ emergency_loads | length > 0 }}"
+                    sequence:
+                      - service: switch.turn_on
+                        target:
+                          entity_id: !input emergency_loads
+
+          # Final notification
+          - service: !input notification_service
+            data:
+              title: "✅ Grid Power Fully Restored"
+              message: >
+                Grid power fully restored at {{ timestamp }}.
+
+                Final Status:
+                - Grid Voltage: {{ grid_voltage }}V
+                - Grid Frequency: {{ grid_freq }}Hz
+                - Battery SOC: {{ battery_soc }}%
+                - Mode: {{ normal_priority }}
+
+                {% if soft_start %}
+                All loads restored with soft-start sequencing.
+                {% else %}
+                All loads restored.
+                {% endif %}
+
+                System returned to normal operation.
+              data:
+                tag: "srne_grid_failure"
+
+          # Log full restoration
+          - service: system_log.write
+            data:
+              message: >
+                Grid Disconnection Handler: Full restoration complete - voltage {{ grid_voltage }}V, SOC {{ battery_soc }}%
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+mode: queued
+max: 5
+max_exceeded: warning

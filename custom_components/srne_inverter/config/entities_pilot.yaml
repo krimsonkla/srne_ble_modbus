@@ -1,0 +1,6472 @@
+version: 2.0
+
+# ============================================================================
+# DEVICE METADATA
+# ============================================================================
+device:
+  manufacturer: "SRNE"
+  model: "HF Series Inverter"
+  protocol_version: "1.96"
+  protocol_type: "modbus_rtu"
+
+  # Model-specific feature flags
+  # These determine which register ranges are available
+  features:
+    grid_tie: false          # Grid-connected/tie functionality (0xE400-0xE43F)
+    diesel_mode: false       # Diesel generator mode registers
+    three_phase: false       # Three-phase specific registers
+    split_phase: false       # Split-phase specific registers
+    parallel_operation: false  # Parallel inverter operation
+
+  # Register ranges that require specific features
+  # Registers in these ranges will be skipped if the feature is disabled
+  feature_ranges:
+    grid_tie:
+      - {start: 0xE400, end: 0xE43F}  # Grid-tie parameters group 08
+    timed_operation:
+      - {start: 0xE02C, end: 0xE040}  # Timed charge/discharge (some models)
+    advanced_output:
+      - {start: 0xE21C, end: 0xE221}  # Advanced output settings (some models)
+
+  communication:
+    baudrate: 9600
+    bytesize: 8
+    parity: "N"
+    stopbits: 1
+    default_slave_id: 1
+
+  timing:
+    command_delay: 2000
+    batch_read_delay: 800
+    write_timeout: 2000
+    read_timeout: 2000
+
+# ============================================================================
+# CONFIG FLOW PAGES
+# ============================================================================
+# Page definitions for dynamic config flow generation
+# Pages are displayed in order and can have danger warnings
+config_pages:
+  battery_config:
+    order: 1
+    icon: "mdi:battery-settings"
+    translations:
+      en:
+        title: "Battery Configuration"
+        description: "Basic battery system voltage and type settings"
+
+  battery_management:
+    order: 2
+    icon: "mdi:battery-charging"
+    translations:
+      en:
+        title: "Battery Management"
+        description: "Battery charge, discharge, and protection voltage settings"
+
+  pv_settings:
+    order: 3
+    icon: "mdi:solar-power"
+    translations:
+      en:
+        title: "Solar Power Settings"
+        description: "PV panel configuration and charge priority settings"
+
+  integration:
+    order: 4
+    icon: "mdi:cog"
+    translations:
+      en:
+        title: "Integration Settings"
+        description: "Communication, polling, and Home Assistant integration settings"
+
+  expert:
+    order: 5
+    icon: "mdi:alert-octagon"
+    danger_level: "dangerous"
+    translations:
+      en:
+        title: "Expert Settings"
+        description: "⚠️ Advanced settings - incorrect values may affect system operation"
+        warning: "These settings require technical knowledge. Incorrect values may cause system instability or reduced performance."
+
+  inverter_output:
+    order: 6
+    icon: "mdi:power-plug"
+    danger_level: "critical"
+    translations:
+      en:
+        title: "Inverter Output Settings"
+        description: "⚠️ DANGER: Grid-connected and output settings"
+        warning: "CRITICAL: These settings directly affect grid connection and power output. Improper configuration may cause equipment damage, electrical hazards, or grid code violations. Consult a qualified electrician or the manufacturer before changing these values."
+
+# ============================================================================
+# CONFIG FLOW VALIDATION
+# ============================================================================
+# Cross-field validation rules for config flow
+config_validation:
+  rules:
+    - name: "bulk_float_voltage_relationship"
+      fields: ["bulk_charge_voltage", "float_charge_voltage"]
+      condition: "bulk_charge_voltage > float_charge_voltage"
+      translations:
+        en:
+          error: "Bulk charge voltage must be higher than float charge voltage"
+          hint: "Bulk charging brings the battery to full capacity, float maintains it"
+
+    - name: "low_shutdown_voltage_relationship"
+      fields: ["battery_low_voltage", "battery_shutdown_voltage"]
+      condition: "battery_low_voltage > battery_shutdown_voltage"
+      translations:
+        en:
+          error: "Low battery voltage must be higher than shutdown voltage"
+          hint: "The system warns at low voltage before forcing shutdown"
+
+    - name: "charge_current_relationship"
+      fields: ["max_ac_charge_current", "max_charge_current"]
+      condition: "max_ac_charge_current <= max_charge_current"
+      translations:
+        en:
+          error: "AC charge current cannot exceed maximum charge current"
+          hint: "AC charging is limited by the overall maximum charge current setting"
+
+# ============================================================================
+# REGISTER DEFINITIONS
+# ============================================================================
+registers:
+  # Command registers (for switches)
+  power_control:
+    address: 0xDF00
+    hex_address: "DF00"
+    decimal_address: 57088
+    name: "CmdPowerOnOff"
+    type: write
+    length: 1
+    data_type: uint16
+    description: "AC inverter power on/off control"
+    values:
+      0: "OFF"
+      1: "ON"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 100
+      translations:
+        en:
+          title: "Inverter Power Control"
+          description: "Turn inverter AC output on or off"
+          hint: "This controls the main AC output of the inverter"
+
+  # Writable Configuration Registers for Number Entities
+  max_ac_charge_current:
+    address: 0xE205
+    hex_address: "E205"
+    decimal_address: 57861
+    name: "IbattLineChgLimit"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    min: 0
+    max: 200
+    default: 60
+    description: "Maximum charging current limit for AC power charging"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 10
+      translations:
+        en:
+          title: "Maximum AC Charge Current"
+          description: "Maximum current allowed when charging from AC grid power"
+          hint: "Higher values charge faster but may stress the battery. Must not exceed max charge current."
+      validation:
+        warning_if_above: 100
+        must_be_less_than_or_equal_to: "max_charge_current"
+
+  max_charge_current:
+    address: 0xE20A
+    hex_address: "E20A"
+    decimal_address: 57866
+    name: "MaxChgCurr"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    min: 0
+    max: 200
+    default: 80
+    description: "Maximum charge current limit for battery"
+    config_flow:
+      page: "battery_management"
+      danger_level: "warning"
+      display_order: 5
+      translations:
+        en:
+          title: "Maximum Charge Current"
+          description: "Overall maximum charging current from all sources (PV + AC)"
+          hint: "Consult your battery specifications. Typically 0.2C to 0.5C of battery capacity is safe."
+      validation:
+        warning_if_above: 120
+        depends_on_battery_type: true
+
+  float_charge_voltage:
+    address: 0xE009
+    hex_address: "E009"
+    decimal_address: 57353
+    name: "BatFloatChgVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 14.0
+    description: "Float charging voltage for lead-acid battery"
+    config_flow:
+      page: "battery_management"
+      danger_level: "warning"
+      display_order: 25
+      translations:
+        en:
+          title: "Float Charge Voltage"
+          description: "Voltage to maintain battery at full charge (float stage)"
+          hint: "Typical: 13.5-13.8V (12V), 27.0-27.6V (24V). Must be lower than bulk voltage."
+      validation:
+        must_be_less_than: "bulk_charge_voltage"
+        depends_on_battery_type: true
+        typical_range:
+          12V: [13.5, 13.8]
+          24V: [27.0, 27.6]
+          48V: [54.0, 55.2]
+
+  bulk_charge_voltage:
+    address: 0xE008
+    hex_address: "E008"
+    decimal_address: 57352
+    name: "BatImprovChgVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 14.4
+    description: "Boost charge voltage / over-charging voltage"
+    config_flow:
+      page: "battery_management"
+      danger_level: "warning"
+      display_order: 20
+      translations:
+        en:
+          title: "Bulk Charge Voltage"
+          description: "Target voltage for bulk/boost charging stage"
+          hint: "Typical: 14.4-14.7V (12V), 28.8-29.4V (24V). Must be higher than float voltage."
+      validation:
+        must_be_greater_than: "float_charge_voltage"
+        depends_on_battery_type: true
+        typical_range:
+          12V: [14.4, 14.7]
+          24V: [28.8, 29.4]
+          48V: [57.6, 58.8]
+
+  battery_low_voltage:
+    address: 0xE00D
+    hex_address: "E00D"
+    decimal_address: 57357
+    name: "BatOverDischgVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 12.2
+    description: "Low battery voltage with load cut-off"
+    config_flow:
+      page: "battery_management"
+      danger_level: "dangerous"
+      display_order: 35
+      translations:
+        en:
+          title: "Battery Low Voltage"
+          description: "Voltage at which load is disconnected to protect battery"
+          hint: "Typical: 11.5-12.2V (12V), 23.0-24.4V (24V). Must be higher than shutdown voltage."
+      validation:
+        must_be_greater_than: "battery_shutdown_voltage"
+        depends_on_battery_type: true
+        typical_range:
+          12V: [11.5, 12.2]
+          24V: [23.0, 24.4]
+          48V: [46.0, 48.8]
+
+  battery_shutdown_voltage:
+    address: 0xE00E
+    hex_address: "E00E"
+    decimal_address: 57358
+    name: "BatDischgLimitVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 11.2
+    description: "Discharge limit voltage - immediate load cut-off"
+    config_flow:
+      page: "battery_management"
+      danger_level: "dangerous"
+      display_order: 40
+      translations:
+        en:
+          title: "Battery Shutdown Voltage"
+          description: "Critical voltage for immediate system shutdown"
+          hint: "Typical: 10.5-11.2V (12V), 21.0-22.4V (24V). Protects battery from deep discharge damage."
+      validation:
+        must_be_less_than: "battery_low_voltage"
+        depends_on_battery_type: true
+        typical_range:
+          12V: [10.5, 11.2]
+          24V: [21.0, 22.4]
+          48V: [42.0, 44.8]
+
+  grid_charge_start_voltage:
+    address: 0xE01B
+    hex_address: "E01B"
+    decimal_address: 57371
+    name: "BatSwitchDcVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 11.5
+    description: "Battery voltage threshold to switch to AC power"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 45
+      translations:
+        en:
+          title: "Grid Charge Start Voltage"
+          description: "Battery voltage at which AC charging begins"
+          hint: "Typical: 11.5-12.0V (12V), 23.0-24.0V (24V). Should be between low voltage and shutdown voltage."
+      validation:
+        must_be_greater_than: "battery_shutdown_voltage"
+        must_be_less_than: "battery_low_voltage"
+
+  pv_power_balance:
+    address: 0xE039
+    hex_address: "E039"
+    decimal_address: 57401
+    name: "PvPowerPrioritySet"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 2
+    default: 0
+    description: "PV output priority setting"
+    values:
+      0: "Charging priority"
+      1: "Load priority"
+      2: "Reserved"
+    config_flow:
+      page: "pv_settings"
+      danger_level: "safe"
+      display_order: 10
+      translations:
+        en:
+          title: "PV Power Priority"
+          description: "Choose where solar power goes first"
+          hint: "Charging Priority: charges battery first. Load Priority: powers loads first."
+      options:
+        0:
+          label: "Charging Priority"
+          description: "Solar power charges battery before powering loads"
+        1:
+          label: "Load Priority"
+          description: "Solar power supplies loads before charging battery"
+        2:
+          label: "Reserved"
+          description: "Not currently used"
+
+  # ==========================================================================
+  # TIER 1 CRITICAL MISSING REGISTERS (Protocol v1.96)
+  # ==========================================================================
+  # These registers are essential for proper inverter configuration and
+  # were identified as critical priority during Phase 1 protocol review
+
+  pv_charge_current:
+    address: 0xE001
+    hex_address: "E001"
+    decimal_address: 57345
+    name: "PvChgCurrSet"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    min: 0
+    max: 150
+    default: 80
+    description: "PV maximum charging current limit"
+    config_flow:
+      page: "pv_settings"
+      danger_level: "warning"
+      display_order: 20
+      translations:
+        en:
+          title: "PV Charge Current Limit"
+          description: "Maximum current allowed from solar panels for charging"
+          hint: "Typical: Gen-1: 50A, Gen-2: 60A, Gen-3: 80-100A. Consult your inverter specifications."
+      validation:
+        warning_if_above: 100
+        must_be_less_than_or_equal_to: "max_charge_current"
+
+  battery_capacity:
+    address: 0xE002
+    hex_address: "E002"
+    decimal_address: 57346
+    name: "BatRateCap"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "AH"
+    min: 0
+    max: 400
+    default: 100
+    description: "Battery rated capacity in amp-hours"
+    config_flow:
+      page: "battery_config"
+      danger_level: "warning"
+      display_order: 10
+      translations:
+        en:
+          title: "Battery Rated Capacity"
+          description: "Total amp-hour capacity of your battery bank"
+          hint: "Example: 200Ah battery bank = 200. Critical for accurate SOC calculation and charge management."
+      validation:
+        typical_range: [50, 400]
+
+  battery_voltage:
+    address: 0xE003
+    hex_address: "E003"
+    decimal_address: 57347
+    name: "BatRateVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "V"
+    min: 12
+    max: 255
+    default: 48
+    description: "Battery system voltage - must match your battery bank"
+    config_flow:
+      page: "battery_config"
+      danger_level: "critical"
+      display_order: 5
+      translations:
+        en:
+          title: "Battery System Voltage"
+          description: "Nominal voltage of your battery system"
+          hint: "CRITICAL: Must exactly match your battery configuration. Incorrect setting can damage equipment."
+      options:
+        12:
+          label: "12V"
+          description: "12V battery system"
+        24:
+          label: "24V"
+          description: "24V battery system"
+        36:
+          label: "36V"
+          description: "36V battery system"
+        48:
+          label: "48V"
+          description: "48V battery system (most common)"
+
+  battery_type:
+    address: 0xE004
+    hex_address: "E004"
+    decimal_address: 57348
+    name: "BatTypeSet"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 14
+    default: 3
+    description: "Battery chemistry type selection"
+    config_flow:
+      page: "battery_config"
+      danger_level: "critical"
+      display_order: 15
+      translations:
+        en:
+          title: "Battery Type"
+          description: "Select battery chemistry type"
+          hint: "CRITICAL: Must match your battery chemistry. Wrong setting causes improper charging and battery damage."
+      options:
+        0:
+          label: "User Defined"
+          description: "Custom battery parameters"
+        1:
+          label: "Sealed Lead Acid (SLD)"
+          description: "Sealed lead-acid battery"
+        2:
+          label: "Flooded Lead Acid (FLD)"
+          description: "Flooded/wet cell lead-acid battery"
+        3:
+          label: "Gel (GEL)"
+          description: "Gel cell lead-acid battery"
+        4:
+          label: "LiFePO4 14S"
+          description: "Lithium iron phosphate 14 series"
+        5:
+          label: "LiFePO4 15S"
+          description: "Lithium iron phosphate 15 series"
+        6:
+          label: "LiFePO4 16S"
+          description: "Lithium iron phosphate 16 series (48V)"
+        7:
+          label: "LiFePO4 7S"
+          description: "Lithium iron phosphate 7 series"
+        8:
+          label: "LiFePO4 8S"
+          description: "Lithium iron phosphate 8 series"
+        9:
+          label: "LiFePO4 9S"
+          description: "Lithium iron phosphate 9 series"
+        10:
+          label: "Ternary Lithium 7S"
+          description: "Ternary lithium battery 7 series"
+        11:
+          label: "Ternary Lithium 8S"
+          description: "Ternary lithium battery 8 series"
+        12:
+          label: "Ternary Lithium 13S"
+          description: "Ternary lithium battery 13 series"
+        13:
+          label: "Ternary Lithium 14S"
+          description: "Ternary lithium battery 14 series"
+
+  battery_overvoltage:
+    address: 0xE005
+    hex_address: "E005"
+    decimal_address: 57349
+    name: "BatOverVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 15.5
+    description: "Battery over-voltage protection point"
+    config_flow:
+      page: "battery_management"
+      danger_level: "dangerous"
+      display_order: 15
+      translations:
+        en:
+          title: "Battery Over-Voltage Protection"
+          description: "Voltage at which charging stops to prevent battery damage"
+          hint: "Typical: 15.0-15.5V (12V), 30.0-31.0V (24V), 60.0-62.0V (48V). Should be higher than bulk charge voltage."
+      validation:
+        must_be_greater_than: "bulk_charge_voltage"
+        typical_range:
+          12V: [15.0, 15.5]
+          24V: [30.0, 31.0]
+          48V: [60.0, 62.0]
+
+  battery_charge_limit_voltage:
+    address: 0xE006
+    hex_address: "E006"
+    decimal_address: 57350
+    name: "BatChgLimitVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 14.4
+    description: "Over-charging protection voltage limit"
+    config_flow:
+      page: "battery_management"
+      danger_level: "dangerous"
+      display_order: 18
+      translations:
+        en:
+          title: "Charge Limit Voltage"
+          description: "Maximum voltage allowed during charging cycle"
+          hint: "Prevents overcharging. Usually same as or slightly higher than bulk charge voltage."
+      validation:
+        must_be_less_than: "battery_overvoltage"
+        must_be_greater_than_or_equal_to: "bulk_charge_voltage"
+
+  output_voltage:
+    address: 0xE208
+    hex_address: "E208"
+    decimal_address: 57864
+    name: "OutputVoltSet"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 100
+    max: 264
+    default: 220
+    description: "AC output voltage setting"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 10
+      translations:
+        en:
+          title: "Output Voltage"
+          description: "AC output voltage for your loads"
+          hint: "CRITICAL: Must match your local grid standard. 110-120V (North America), 220-240V (Europe/Asia/Australia)."
+      options:
+        110:
+          label: "110V"
+          description: "North American split-phase L1 or L2"
+        115:
+          label: "115V"
+          description: "North American nominal"
+        120:
+          label: "120V"
+          description: "North American split-phase L1 or L2"
+        220:
+          label: "220V"
+          description: "European/Asian standard"
+        230:
+          label: "230V"
+          description: "European nominal"
+        240:
+          label: "240V"
+          description: "UK/Australian standard"
+
+  output_frequency:
+    address: 0xE209
+    hex_address: "E209"
+    decimal_address: 57865
+    name: "OutputFreqSet"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    min: 45
+    max: 65
+    default: 50
+    description: "AC output frequency setting"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 15
+      translations:
+        en:
+          title: "Output Frequency"
+          description: "AC output frequency for your loads"
+          hint: "CRITICAL: Must match your local grid standard. 60Hz (Americas, parts of Asia), 50Hz (Europe, most of world)."
+      options:
+        50:
+          label: "50 Hz"
+          description: "Europe, Asia, Africa, Australia standard"
+        60:
+          label: "60 Hz"
+          description: "North/South America, parts of Asia standard"
+
+  working_mode:
+    address: 0xE037
+    hex_address: "E037"
+    decimal_address: 57399
+    name: "InvToGridEn"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 3
+    default: 0
+    description: "Inverter working mode - grid connection setting"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 5
+      translations:
+        en:
+          title: "Working Mode"
+          description: "Grid connection mode selection"
+          hint: "CRITICAL: Incorrect setting may violate grid codes or cause equipment damage. Consult electrician and local regulations."
+      options:
+        0:
+          label: "Off-Grid Mode"
+          description: "Standalone operation, no grid connection (default, safest)"
+        1:
+          label: "Grid-Connected Mode"
+          description: "Full grid-tie operation with bidirectional power flow"
+        2:
+          label: "AC Output Anti-Reverse"
+          description: "Prevents power export through AC output"
+        3:
+          label: "AC Input Anti-Reverse"
+          description: "Prevents power export through AC input"
+
+  system_datetime:
+    address: 0x020C
+    hex_address: "020C"
+    decimal_address: 524
+    name: "SysDateTime"
+    type: read_write
+    length: 3
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    description: "System real-time clock - 3 registers: year/month, day/hour, minute/second"
+    config_flow:
+      page: "integration"
+      danger_level: "safe"
+      display_order: 50
+      translations:
+        en:
+          title: "System Date and Time"
+          description: "Inverter's internal clock setting"
+          hint: "Used for timed charge/discharge operations. Format: 3 registers (0x020C: year/month, 0x020D: day/hour, 0x020E: minute/second)"
+      validation:
+        requires_special_encoding: true
+        register_format: "packed_datetime"
+
+  # ==========================================================================
+  # END TIER 1 CRITICAL REGISTERS
+  # ==========================================================================
+
+  # ==========================================================================
+  # TIER 2 HIGH PRIORITY REGISTERS (Protocol v1.96)
+  # ==========================================================================
+  # These registers provide important safety and operational features
+
+  battery_under_voltage:
+    address: 0xE00C
+    hex_address: "E00C"
+    decimal_address: 57356
+    name: "BatUnderVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 11.0
+    description: "Low battery voltage warning without load cut-off"
+    config_flow:
+      page: "battery_management"
+      danger_level: "warning"
+      display_order: 30
+      translations:
+        en:
+          title: "Under-Voltage Warning"
+          description: "Voltage at which low battery warning is triggered"
+          hint: "Typical: 11.0-11.5V (12V), 22.0-23.0V (24V). Warning level before load disconnection."
+      validation:
+        must_be_greater_than: "battery_low_voltage"
+        typical_range:
+          12V: [11.0, 11.5]
+          24V: [22.0, 23.0]
+          48V: [44.0, 46.0]
+
+  charge_max_temperature:
+    address: 0xE015
+    hex_address: "E015"
+    decimal_address: 57365
+    name: "ChgMaxTemper"
+    type: read_write
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "°C"
+    min: -40
+    max: 100
+    default: 60
+    description: "Maximum battery temperature for charging"
+    config_flow:
+      page: "battery_management"
+      danger_level: "warning"
+      display_order: 50
+      translations:
+        en:
+          title: "Charge Max Temperature"
+          description: "Stop charging when battery exceeds this temperature"
+          hint: "Typical: 45-60°C. Protects battery from high-temperature damage during charging."
+      validation:
+        must_be_greater_than: "charge_min_temperature"
+        typical_range: [45, 60]
+
+  charge_min_temperature:
+    address: 0xE016
+    hex_address: "E016"
+    decimal_address: 57366
+    name: "ChgMinTemper"
+    type: read_write
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "°C"
+    min: -40
+    max: 100
+    default: -30
+    description: "Minimum battery temperature for charging"
+    config_flow:
+      page: "battery_management"
+      danger_level: "warning"
+      display_order: 55
+      translations:
+        en:
+          title: "Charge Min Temperature"
+          description: "Stop charging when battery below this temperature"
+          hint: "Typical: 0-5°C (lead-acid), -20 to -30°C (lithium). Cold charging can damage batteries."
+      validation:
+        must_be_less_than: "charge_max_temperature"
+        typical_range: [-30, 5]
+
+  discharge_max_temperature:
+    address: 0xE017
+    hex_address: "E017"
+    decimal_address: 57367
+    name: "DisChgMaxTemper"
+    type: read_write
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "°C"
+    min: -40
+    max: 100
+    default: 60
+    description: "Maximum battery temperature for discharging"
+    config_flow:
+      page: "battery_management"
+      danger_level: "warning"
+      display_order: 60
+      translations:
+        en:
+          title: "Discharge Max Temperature"
+          description: "Stop discharging when battery exceeds this temperature"
+          hint: "Typical: 50-70°C. Protects battery and loads from thermal damage."
+      validation:
+        must_be_greater_than: "discharge_min_temperature"
+        typical_range: [50, 70]
+
+  discharge_min_temperature:
+    address: 0xE018
+    hex_address: "E018"
+    decimal_address: 57368
+    name: "DisChgMinTemper"
+    type: read_write
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "°C"
+    min: -40
+    max: 100
+    default: -30
+    description: "Minimum battery temperature for discharging"
+    config_flow:
+      page: "battery_management"
+      danger_level: "warning"
+      display_order: 65
+      translations:
+        en:
+          title: "Discharge Min Temperature"
+          description: "Stop discharging when battery below this temperature"
+          hint: "Typical: -20 to -10°C (lead-acid), -30°C (lithium). Prevents capacity loss and damage."
+      validation:
+        must_be_less_than: "discharge_max_temperature"
+        typical_range: [-30, -10]
+
+  parallel_mode:
+    address: 0xE201
+    hex_address: "E201"
+    decimal_address: 57857
+    name: "ParallMode"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 7
+    default: 0
+    description: "Parallel machine mode configuration"
+    config_flow:
+      page: "expert"
+      danger_level: "dangerous"
+      display_order: 20
+      translations:
+        en:
+          title: "Parallel Mode"
+          description: "Configuration for multi-inverter parallel operation"
+          hint: "DANGER: Only change if you have multiple inverters. Incorrect setting can damage equipment."
+      options:
+        0:
+          label: "Single Machine"
+          description: "Standalone operation - one inverter only (default, safest)"
+        1:
+          label: "Single-Phase Parallel"
+          description: "Multiple inverters in single-phase parallel"
+        2:
+          label: "Two-Phase Parallel"
+          description: "Two-phase parallel configuration"
+        3:
+          label: "Two-Phase Parallel 120°"
+          description: "Two-phase parallel with 120° phase shift"
+        4:
+          label: "Two-Phase Parallel 180°"
+          description: "Two-phase parallel with 180° phase shift"
+        5:
+          label: "Three-Phase A"
+          description: "Three-phase parallel - Phase A"
+        6:
+          label: "Three-Phase B"
+          description: "Three-phase parallel - Phase B"
+        7:
+          label: "Three-Phase C"
+          description: "Three-phase parallel - Phase C"
+
+  ac_voltage_range:
+    address: 0xE20B
+    hex_address: "E20B"
+    decimal_address: 57867
+    name: "AcVoltRange"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 1
+    description: "AC input voltage acceptable range"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 15
+      translations:
+        en:
+          title: "AC Input Voltage Range"
+          description: "Choose tolerance for grid voltage fluctuations"
+          hint: "Wide band (APL): accepts larger voltage variations. Narrow band (UPS): tighter tolerance, switches to battery sooner."
+      options:
+        0:
+          label: "Wide Band (APL)"
+          description: "Accepts wider voltage variations (~±25%), better grid compatibility"
+        1:
+          label: "Narrow Band (UPS)"
+          description: "Tight tolerance (~±10%), switches to battery on small grid variations"
+
+  charge_source_priority:
+    address: 0xE20F
+    hex_address: "E20F"
+    decimal_address: 57871
+    name: "ChgSourcePriority"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 3
+    default: 2
+    description: "Energy source priority for battery charging"
+    config_flow:
+      page: "pv_settings"
+      danger_level: "safe"
+      display_order: 15
+      translations:
+        en:
+          title: "Charge Source Priority"
+          description: "Choose which energy source charges the battery first"
+          hint: "PV Priority: uses solar first. AC Priority: uses grid first. Hybrid: uses both with PV preference."
+      options:
+        0:
+          label: "PV Priority"
+          description: "Solar charges first, AC backup when solar insufficient"
+        1:
+          label: "AC Priority"
+          description: "Grid charges first, solar backup when grid unavailable"
+        2:
+          label: "Hybrid Mode"
+          description: "Both sources charge simultaneously, solar has priority (recommended)"
+        3:
+          label: "PV Only"
+          description: "Only solar charging, AC input disabled for charging"
+
+  bms_communication:
+    address: 0xE215
+    hex_address: "E215"
+    decimal_address: 57877
+    name: "BmsCommEnable"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 2
+    default: 0
+    description: "Battery Management System communication protocol"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 25
+      translations:
+        en:
+          title: "BMS Communication"
+          description: "Enable communication with external Battery Management System"
+          hint: "Only enable if you have a compatible BMS connected. Improves battery monitoring and protection."
+      options:
+        0:
+          label: "Disabled"
+          description: "No BMS communication (default)"
+        1:
+          label: "RS485 BMS"
+          description: "Enable RS485 BMS communication protocol"
+        2:
+          label: "CAN BMS"
+          description: "Enable CAN bus BMS communication protocol"
+
+  # ==========================================================================
+  # END TIER 2 HIGH PRIORITY REGISTERS
+  # ==========================================================================
+
+  # ==========================================================================
+  # TIER 3 MEDIUM PRIORITY REGISTERS - Battery Parameters
+  # ==========================================================================
+
+  equalizing_charge_voltage:
+    address: 0xE007
+    hex_address: "E007"
+    decimal_address: 57351
+    name: "BatConstChgVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 14.4
+    description: "Equalizing charging voltage for lead-acid batteries"
+    config_flow:
+      page: "battery_management"
+      danger_level: "warning"
+      display_order: 22
+      translations:
+        en:
+          title: "Equalizing Charge Voltage"
+          description: "Voltage for periodic equalization charging"
+          hint: "Lead-acid only. Balances cell voltages. Typical: same as bulk charge voltage."
+
+  boost_charge_return_voltage:
+    address: 0xE00A
+    hex_address: "E00A"
+    decimal_address: 57354
+    name: "BatImprovChgBackVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 13.2
+    description: "Voltage to re-enter boost charge from float"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 27
+      translations:
+        en:
+          title: "Boost Charge Return Voltage"
+          description: "If voltage drops below this during float, restart boost charge"
+          hint: "Typical: 13.0-13.5V (12V). Between float and low voltage."
+
+  over_discharge_return_voltage:
+    address: 0xE00B
+    hex_address: "E00B"
+    decimal_address: 57355
+    name: "BatOverDischgBackVolt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 12.6
+    description: "Voltage to exit over-discharge protection"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 42
+      translations:
+        en:
+          title: "Over-Discharge Recovery Voltage"
+          description: "Battery voltage to resume after over-discharge protection"
+          hint: "Typical: 12.5-12.8V (12V). Higher than low voltage cutoff."
+
+  discharge_cutoff_soc:
+    address: 0xE00F
+    hex_address: "E00F"
+    decimal_address: 57359
+    name: "BatStopSOC"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "%"
+    min: 0
+    max: 100
+    default: 5
+    description: "SOC percentage to stop discharge"
+    config_flow:
+      page: "battery_management"
+      danger_level: "warning"
+      display_order: 70
+      translations:
+        en:
+          title: "Discharge Cutoff SOC"
+          description: "Stop discharging when battery SOC reaches this level"
+          hint: "Typical: 5-20%. Protects battery from deep discharge."
+
+  over_discharge_delay:
+    address: 0xE010
+    hex_address: "E010"
+    decimal_address: 57360
+    name: "BatOverDischgDelayTime"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "s"
+    min: 0
+    max: 120
+    default: 60
+    description: "Delay before load cutoff on over-discharge"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 75
+      translations:
+        en:
+          title: "Over-Discharge Delay"
+          description: "Seconds to wait before cutting off load on low voltage"
+          hint: "Allows time for voltage recovery under load transients."
+
+  equalizing_charge_time:
+    address: 0xE011
+    hex_address: "E011"
+    decimal_address: 57361
+    name: "BatConstChgTime"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "min"
+    min: 0
+    max: 900
+    default: 120
+    description: "Duration of equalizing charge"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 80
+      translations:
+        en:
+          title: "Equalizing Charge Time"
+          description: "How long to maintain equalizing charge voltage"
+          hint: "Lead-acid only. Typical: 60-180 minutes."
+
+  boost_charge_time:
+    address: 0xE012
+    hex_address: "E012"
+    decimal_address: 57362
+    name: "BatImprovChgTime"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "min"
+    min: 10
+    max: 900
+    default: 120
+    description: "Duration of boost charge"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 85
+      translations:
+        en:
+          title: "Boost Charge Time"
+          description: "Maximum time for boost charging stage"
+          hint: "Typical: 120-240 minutes before switching to float."
+
+  equalizing_charge_interval:
+    address: 0xE013
+    hex_address: "E013"
+    decimal_address: 57363
+    name: "BatConstChgGapTime"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "days"
+    min: 0
+    max: 255
+    default: 30
+    description: "Days between automatic equalizing charges"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 90
+      translations:
+        en:
+          title: "Equalizing Charge Interval"
+          description: "Days between automatic equalization cycles"
+          hint: "Lead-acid only. Typical: 30 days. 0=disabled."
+
+  temperature_compensation_coefficient:
+    address: 0xE014
+    hex_address: "E014"
+    decimal_address: 57364
+    name: "CoeffTemperCompen"
+    type: read_write
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "mV/°C/2V"
+    min: 0
+    max: 10
+    default: 5
+    description: "Temperature compensation coefficient for charge voltages"
+    config_flow:
+      page: "battery_management"
+      danger_level: "warning"
+      display_order: 92
+      translations:
+        en:
+          title: "Temperature Compensation Coefficient"
+          description: "Voltage adjustment per degree Celsius"
+          hint: "Lead-acid only. Typical: 3-5mV/°C/2V cell. Adjust charge voltage with temperature."
+
+  battery_heater_start_temp:
+    address: 0xE019
+    hex_address: "E019"
+    decimal_address: 57369
+    name: "HeatBatStartTemper"
+    type: read_write
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "°C"
+    min: -40
+    max: 100
+    default: 0
+    description: "Temperature to start battery heater"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 30
+      translations:
+        en:
+          title: "Battery Heater Start Temperature"
+          description: "Turn on battery heater when temperature drops below this"
+          hint: "For systems with battery heaters in cold climates."
+
+  battery_heater_stop_temp:
+    address: 0xE01A
+    hex_address: "E01A"
+    decimal_address: 57370
+    name: "HeatBatStopTemper"
+    type: read_write
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "°C"
+    min: -40
+    max: 100
+    default: 5
+    description: "Temperature to stop battery heater"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 35
+      translations:
+        en:
+          title: "Battery Heater Stop Temperature"
+          description: "Turn off battery heater when temperature rises above this"
+          hint: "Should be higher than start temperature."
+
+  stop_charge_current:
+    address: 0xE01C
+    hex_address: "E01C"
+    decimal_address: 57372
+    name: "StopChgCurrSet"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    min: 0
+    max: 10
+    default: 2
+    description: "Stop charging when current drops below this (lithium only)"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 95
+      translations:
+        en:
+          title: "Stop Charge Current (Lithium)"
+          description: "Stop constant-voltage charging when current drops below this"
+          hint: "Lithium only. Typical: 2-5A or 0.02-0.05C."
+
+  stop_charge_soc:
+    address: 0xE01D
+    hex_address: "E01D"
+    decimal_address: 57373
+    name: "StopChgSocSet"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "%"
+    min: 0
+    max: 100
+    default: 100
+    description: "Stop charging at this SOC (BMS required)"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 100
+      translations:
+        en:
+          title: "Stop Charge SOC"
+          description: "Stop charging when SOC reaches this percentage"
+          hint: "Requires BMS communication. Typical: 90-100%."
+
+  soc_low_alarm:
+    address: 0xE01E
+    hex_address: "E01E"
+    decimal_address: 57374
+    name: "BatSocLowAlarm"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "%"
+    min: 0
+    max: 100
+    default: 15
+    description: "SOC for low capacity alarm (BMS required)"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 105
+      translations:
+        en:
+          title: "Low SOC Alarm"
+          description: "Trigger low battery alarm at this SOC"
+          hint: "Requires BMS. Typical: 15-20%."
+
+  soc_switch_to_grid:
+    address: 0xE01F
+    hex_address: "E01F"
+    decimal_address: 57375
+    name: "BatSocSwToLine"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "%"
+    min: 0
+    max: 100
+    default: 10
+    description: "SOC to switch to grid in SBU mode (BMS required)"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 110
+      translations:
+        en:
+          title: "SOC Switch to Grid"
+          description: "In SBU mode, use grid when SOC drops to this level"
+          hint: "Requires BMS. Typical: 10-20%. Protects battery from deep discharge."
+
+  soc_switch_to_battery:
+    address: 0xE020
+    hex_address: "E020"
+    decimal_address: 57376
+    name: "BatSocSwToBatt"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "%"
+    min: 1
+    max: 100
+    default: 100
+    description: "SOC to switch back to battery in SBU mode (BMS required)"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 115
+      translations:
+        en:
+          title: "SOC Switch to Battery"
+          description: "In SBU mode, switch back to battery when SOC rises to this"
+          hint: "Requires BMS. Should be higher than switch-to-grid SOC."
+
+  inverter_switch_voltage:
+    address: 0xE022
+    hex_address: "E022"
+    decimal_address: 57378
+    name: "BattVoltSwToInv"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 9
+    max: 15.5
+    default: 14
+    description: "Battery voltage to switch back to inverter mode"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 120
+      translations:
+        en:
+          title: "Inverter Switch Voltage"
+          description: "Battery voltage to resume inverter operation after grid mode"
+          hint: "Should be near float voltage. Typical: 13.5-14V (12V)."
+
+  equalizing_charge_timeout:
+    address: 0xE023
+    hex_address: "E023"
+    decimal_address: 57379
+    name: "BattEqualChgTimeout"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "min"
+    min: 5
+    max: 900
+    default: 240
+    description: "Maximum equalizing charge duration"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 125
+      translations:
+        en:
+          title: "Equalizing Charge Timeout"
+          description: "Safety timeout for equalizing charge"
+          hint: "Prevents overcharging. Typical: 180-360 minutes."
+
+  lithium_activation_current:
+    address: 0xE024
+    hex_address: "E024"
+    decimal_address: 57380
+    name: "LiBattActiveCurrSet"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    min: 0
+    max: 20
+    default: 8
+    description: "Current for lithium battery activation"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 40
+      translations:
+        en:
+          title: "Lithium Activation Current"
+          description: "Current for activating deeply discharged lithium batteries"
+          hint: "Lithium only. Recovers batteries from protection mode."
+
+  bms_charge_limit_mode:
+    address: 0xE025
+    hex_address: "E025"
+    decimal_address: 57381
+    name: "BMS ChgLCMode"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 2
+    default: 1
+    description: "BMS charge current limiting mode"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 45
+      translations:
+        en:
+          title: "BMS Charge Limit Mode"
+          description: "How BMS controls charging current"
+          hint: "Requires BMS. Controls BMS current limiting behavior."
+
+  timed_charge_enable:
+    address: 0xE02C
+    hex_address: "E02C"
+    decimal_address: 57388
+    name: "OnTimeChargeEn"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Enable timed charging periods"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 50
+      translations:
+        en:
+          title: "Timed Charging Enable"
+          description: "Enable scheduled charging windows"
+          hint: "Allows charging only during specified time periods."
+      options:
+        0:
+          label: "Disabled"
+          description: "Charge anytime"
+        1:
+          label: "Enabled"
+          description: "Charge only during scheduled periods"
+
+  timed_discharge_enable:
+    address: 0xE033
+    hex_address: "E033"
+    decimal_address: 57395
+    name: "OnTimeDischgEn"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Enable timed discharging periods"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 55
+      translations:
+        en:
+          title: "Timed Discharging Enable"
+          description: "Enable scheduled discharging windows"
+          hint: "Controls when battery can discharge to loads."
+      options:
+        0:
+          label: "Disabled"
+          description: "Discharge anytime"
+        1:
+          label: "Enabled"
+          description: "Discharge only during scheduled periods"
+
+  leakage_current_detection:
+    address: 0xE038
+    hex_address: "E038"
+    decimal_address: 57400
+    name: "LeakageCurrDtcEn"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Enable leakage current detection"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 60
+      translations:
+        en:
+          title: "Leakage Current Detection"
+          description: "Enable ground fault/leakage detection"
+          hint: "Safety feature. May cause nuisance trips in some installations."
+      options:
+        0:
+          label: "Disabled"
+          description: "No leakage detection"
+        1:
+          label: "Enabled"
+          description: "Monitor for ground faults"
+
+  battery_temp_compensation_enable:
+    address: 0xE03A
+    hex_address: "E03A"
+    decimal_address: 57402
+    name: "BattTemperCompEn"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Enable temperature-compensated charging"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 130
+      translations:
+        en:
+          title: "Temperature Compensation"
+          description: "Adjust charge voltages based on battery temperature"
+          hint: "Lead-acid only. Optimizes charging at different temperatures."
+      options:
+        0:
+          label: "Disabled"
+          description: "Fixed charge voltages"
+        1:
+          label: "Enabled"
+          description: "Temperature-compensated charging"
+
+  # ==========================================================================
+  # TIER 3 MEDIUM PRIORITY REGISTERS - Inverter Parameters
+  # ==========================================================================
+
+  rs485_address:
+    address: 0xE200
+    hex_address: "E200"
+    decimal_address: 57856
+    name: "Rs485AddrSet"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 1
+    max: 254
+    default: 1
+    description: "RS485 communication address"
+    config_flow:
+      page: "integration"
+      danger_level: "warning"
+      display_order: 10
+      translations:
+        en:
+          title: "RS485 Address"
+          description: "Communication address for parallel or multi-device setups"
+          hint: "Each device needs unique address. Default: 1."
+
+  password_set:
+    address: 0xE202
+    hex_address: "E202"
+    decimal_address: 57858
+    name: "PassWordSet"
+    type: write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 65535
+    default: 0
+    description: "Set user password (0=no password)"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 70
+      translations:
+        en:
+          title: "Password Protection"
+          description: "Set 4-digit password for settings protection"
+          hint: "0=no password. Protects settings from unauthorized changes."
+
+  equalizing_charge_enable:
+    address: 0xE206
+    hex_address: "E206"
+    decimal_address: 57862
+    name: "BattEqualChgEnable"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Enable automatic equalizing charge"
+    config_flow:
+      page: "battery_management"
+      danger_level: "safe"
+      display_order: 135
+      translations:
+        en:
+          title: "Equalizing Charge Enable"
+          description: "Enable periodic automatic equalization"
+          hint: "Lead-acid only. Balances cell voltages periodically."
+      options:
+        0:
+          label: "Disabled"
+          description: "No automatic equalization"
+        1:
+          label: "Enabled"
+          description: "Automatic equalization per schedule"
+
+  neutral_ground_short:
+    address: 0xE207
+    hex_address: "E207"
+    decimal_address: 57863
+    name: "N_G_FuncEn"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "N-PE ground cable short circuit enable (model-specific)"
+    config_flow:
+      page: "expert"
+      danger_level: "dangerous"
+      display_order: 75
+      translations:
+        en:
+          title: "Neutral-Ground Bond"
+          description: "Enable N-PE ground bonding (specific models only)"
+          hint: "DANGER: Only for specific models. Consult manual and electrician."
+      options:
+        0:
+          label: "Disabled"
+          description: "Floating neutral"
+        1:
+          label: "Enabled"
+          description: "Bonded neutral-ground"
+
+  power_saving_mode:
+    address: 0xE20C
+    hex_address: "E20C"
+    decimal_address: 57868
+    name: "PowerSavingMode"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Enable power saving mode (reduces standby consumption)"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 80
+      translations:
+        en:
+          title: "Power Saving Mode"
+          description: "Reduce standby power consumption"
+          hint: "May increase response time to load changes."
+      options:
+        0:
+          label: "Disabled"
+          description: "Normal operation"
+        1:
+          label: "Enabled"
+          description: "Low standby power mode"
+
+  auto_restart_overload:
+    address: 0xE20D
+    hex_address: "E20D"
+    decimal_address: 57869
+    name: "AutoRestartOvLoad"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 1
+    description: "Automatically restart after overload fault"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 85
+      translations:
+        en:
+          title: "Auto Restart on Overload"
+          description: "Automatically retry after overload shutdown"
+          hint: "Recommended enabled. Retries after load reduces."
+      options:
+        0:
+          label: "Disabled"
+          description: "Manual restart required"
+        1:
+          label: "Enabled"
+          description: "Auto restart after overload clears"
+
+  auto_restart_over_temp:
+    address: 0xE20E
+    hex_address: "E20E"
+    decimal_address: 57870
+    name: "AutoRestartOvTemper"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 1
+    description: "Automatically restart after over-temperature fault"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 90
+      translations:
+        en:
+          title: "Auto Restart on Over-Temperature"
+          description: "Automatically retry after temperature shutdown"
+          hint: "Recommended enabled. Retries after cooling down."
+      options:
+        0:
+          label: "Disabled"
+          description: "Manual restart required"
+        1:
+          label: "Enabled"
+          description: "Auto restart after cooling"
+
+  alarm_enable:
+    address: 0xE210
+    hex_address: "E210"
+    decimal_address: 57872
+    name: "AlarmEnable"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 1
+    description: "Enable audible alarm/beeper"
+    config_flow:
+      page: "integration"
+      danger_level: "safe"
+      display_order: 20
+      translations:
+        en:
+          title: "Alarm/Beeper Enable"
+          description: "Enable audible alarm for faults and warnings"
+          hint: "Disable for quiet operation, but you won't hear fault alerts."
+      options:
+        0:
+          label: "Disabled"
+          description: "Silent operation"
+        1:
+          label: "Enabled"
+          description: "Audible alarms active"
+
+  alarm_on_source_loss:
+    address: 0xE211
+    hex_address: "E211"
+    decimal_address: 57873
+    name: "AlarmEnWhenSourceLoss"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 1
+    description: "Alarm when input source (grid/PV) is lost"
+    config_flow:
+      page: "integration"
+      danger_level: "safe"
+      display_order: 25
+      translations:
+        en:
+          title: "Alarm on Source Loss"
+          description: "Beep when grid or PV input is lost"
+          hint: "Alerts you to grid outages or PV failures."
+      options:
+        0:
+          label: "Disabled"
+          description: "No alarm on source loss"
+        1:
+          label: "Enabled"
+          description: "Alarm when source lost"
+
+  bypass_on_overload:
+    address: 0xE212
+    hex_address: "E212"
+    decimal_address: 57874
+    name: "BypEnableWhenOvLoad"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 1
+    description: "Switch to bypass (grid) on overload"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 95
+      translations:
+        en:
+          title: "Bypass on Overload"
+          description: "Switch to grid when inverter overloaded"
+          hint: "Recommended enabled. Prevents inverter shutdown on overload."
+      options:
+        0:
+          label: "Disabled"
+          description: "Shut down on overload"
+        1:
+          label: "Enabled"
+          description: "Switch to grid on overload"
+
+  record_faults:
+    address: 0xE213
+    hex_address: "E213"
+    decimal_address: 57875
+    name: "RecordFaultEnable"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 1
+    description: "Record fault history"
+    config_flow:
+      page: "integration"
+      danger_level: "safe"
+      display_order: 30
+      translations:
+        en:
+          title: "Record Fault History"
+          description: "Save fault events to history log"
+          hint: "Recommended enabled for troubleshooting."
+      options:
+        0:
+          label: "Disabled"
+          description: "No fault recording"
+        1:
+          label: "Enabled"
+          description: "Record all faults"
+
+  bms_fault_stop:
+    address: 0xE214
+    hex_address: "E214"
+    decimal_address: 57876
+    name: "BmsErrStopEnable"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Stop operation on BMS communication fault"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 100
+      translations:
+        en:
+          title: "BMS Fault Stop"
+          description: "Shut down if BMS communication fails"
+          hint: "Requires BMS. Safety feature for lithium batteries."
+      options:
+        0:
+          label: "Disabled"
+          description: "Continue on BMS fault"
+        1:
+          label: "Enabled"
+          description: "Stop on BMS fault"
+
+  dc_load_switch:
+    address: 0xE216
+    hex_address: "E216"
+    decimal_address: 57878
+    name: "DcLoadSwitch"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "DC load output control"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 105
+      translations:
+        en:
+          title: "DC Load Control"
+          description: "Enable DC output for direct DC loads"
+          hint: "For models with DC output terminals."
+      options:
+        0:
+          label: "OFF"
+          description: "DC output disabled"
+        1:
+          label: "ON"
+          description: "DC output enabled"
+
+  derate_power:
+    address: 0xE218
+    hex_address: "E218"
+    decimal_address: 57880
+    name: "DeratePower"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.001
+    unit: "W"
+    min: 1000
+    max: 15000
+    default: 0
+    description: "Manually derate (reduce) inverter power rating"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 110
+      translations:
+        en:
+          title: "Derate Power"
+          description: "Reduce maximum inverter power output"
+          hint: "Use to limit power in hot environments or reduce stress."
+
+  bms_protocol:
+    address: 0xE21B
+    hex_address: "E21B"
+    decimal_address: 57883
+    name: "Rs485BmsProtocol"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 30
+    default: 7
+    description: "BMS communication protocol selection"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 115
+      translations:
+        en:
+          title: "BMS Protocol"
+          description: "Select BMS communication protocol type"
+          hint: "Must match your BMS model. Consult BMS documentation."
+
+  max_grid_current:
+    address: 0xE21C
+    hex_address: "E21C"
+    decimal_address: 57884
+    name: "MaxLineCurrent"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    min: 0
+    max: 100
+    default: 40
+    description: "Maximum grid input current (model-specific)"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 120
+      translations:
+        en:
+          title: "Max Grid Input Current"
+          description: "Limit current draw from grid"
+          hint: "Model-specific. Prevents tripping breakers."
+
+  max_grid_power:
+    address: 0xE21D
+    hex_address: "E21D"
+    decimal_address: 57885
+    name: "MaxLinePower"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    min: 0
+    max: 65535
+    default: 50
+    description: "Maximum grid input power (50=500W)"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 125
+      translations:
+        en:
+          title: "Max Grid Power"
+          description: "Peak clipping power from grid"
+          hint: "Value × 10 = watts. Example: 50 = 500W."
+
+  output_phase_wiring:
+    address: 0xE21E
+    hex_address: "E21E"
+    decimal_address: 57886
+    name: "OutputPhaseSet"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 2
+    default: 0
+    description: "Output wiring configuration (model-specific)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 130
+      translations:
+        en:
+          title: "Output Wiring Type"
+          description: "Configure output wiring topology"
+          hint: "CRITICAL: Only for split-phase models. Incorrect setting causes damage."
+      options:
+        0:
+          label: "Single-Phase"
+          description: "Standard single-phase output"
+        1:
+          label: "Three-Phase"
+          description: "Three-phase connection"
+        2:
+          label: "Split-Phase"
+          description: "North American split-phase (120/240V)"
+
+  generator_work_mode:
+    address: 0xE21F
+    hex_address: "E21F"
+    decimal_address: 57887
+    name: "GenWorkMode"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Generator operation mode"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 135
+      translations:
+        en:
+          title: "Generator Work Mode"
+          description: "Configure generator input behavior"
+          hint: "For systems with backup generator."
+      options:
+        0:
+          label: "Standard"
+          description: "Normal generator operation"
+        1:
+          label: "Alternative"
+          description: "Alternative generator mode"
+
+  generator_charge_current:
+    address: 0xE220
+    hex_address: "E220"
+    decimal_address: 57888
+    name: "GenChgMaxCurr"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    min: 0
+    max: 100
+    default: 40
+    description: "Maximum charging current from generator"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 140
+      translations:
+        en:
+          title: "Generator Charge Current"
+          description: "Maximum current when charging from generator"
+          hint: "Prevents overloading generator. Typical: 50-80% of generator rating."
+
+  generator_rated_power:
+    address: 0xE221
+    hex_address: "E221"
+    decimal_address: 57889
+    name: "GenRatePower"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    min: 0
+    max: 65535
+    default: 6000
+    description: "Generator rated power"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 145
+      translations:
+        en:
+          title: "Generator Rated Power"
+          description: "Generator power rating in watts"
+          hint: "Used for load management with generator input."
+
+  # ==========================================================================
+  # TIER 1 CRITICAL - GRID-CONNECTED PARAMETERS (E400-E437)
+  # ==========================================================================
+  # WARNING: These settings are CRITICAL for grid-tie safety and compliance
+  # Incorrect values can cause equipment damage, safety hazards, or grid code violations
+  # Only modify if you understand grid-tie requirements and local regulations
+
+  grid_active_power_set:
+    address: 0xE400
+    hex_address: "E400"
+    decimal_address: 58368
+    name: "GridActivePowerSet"
+    type: read_write
+    requires_feature: "grid_tie"  # Only for grid-connected inverter models
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    min: 0
+    max: 65000
+    default: 0
+    description: "Grid-tie active power export setting"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 20
+      translations:
+        en:
+          title: "Grid Active Power Export"
+          description: "Target power to export to grid"
+          hint: "CRITICAL: Grid-tie only. Must comply with local regulations and utility agreement."
+
+  grid_power_factor:
+    address: 0xE401
+    hex_address: "E401"
+    decimal_address: 58369
+    name: "GridPfSet"
+    type: read_write
+    length: 1
+    data_type: int16
+    scaling: 0.001
+    unit: ""
+    min: -1000
+    max: 1000
+    default: 1000
+    description: "Grid-tie power factor setting (-1.0 to 1.0)"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 25
+      translations:
+        en:
+          title: "Grid Power Factor"
+          description: "Target power factor for grid export"
+          hint: "CRITICAL: 1.0 = unity (most common). Range: -0.8 to -1.0, 0.8 to 1.0. Consult utility requirements."
+
+  grid_reactive_power:
+    address: 0xE402
+    hex_address: "E402"
+    decimal_address: 58370
+    name: "GridQset"
+    type: read_write
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "%"
+    min: -100
+    max: 100
+    default: 0
+    description: "Grid-tie reactive power setting"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 30
+      translations:
+        en:
+          title: "Grid Reactive Power"
+          description: "Reactive power percentage for grid"
+          hint: "CRITICAL: Typically 0%. Consult utility requirements."
+
+  grid_standard:
+    address: 0xE403
+    hex_address: "E403"
+    decimal_address: 58371
+    name: "GridStandard"
+    type: read_write
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 100
+    default: 100
+    description: "Grid connection standard/code selection"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 35
+      translations:
+        en:
+          title: "Grid Standard"
+          description: "Select grid code compliance standard"
+          hint: "CRITICAL: Must match local grid code (VDE, IEC, UL, etc.). Consult manual."
+
+  # Grid Under-Voltage Protection Level 1
+  grid_uv_level1:
+    address: 0xE404
+    hex_address: "E404"
+    decimal_address: 58372
+    name: "GridUVLevel1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 0
+    max: 270
+    default: 184
+    description: "Grid under-voltage protection threshold (Level 1)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 205
+      translations:
+        en:
+          title: "Grid Under-Voltage Level 1"
+          description: "Disconnect when grid voltage drops below this (Level 1)"
+          hint: "CRITICAL: Must match grid code. Typical: 80-85% of nominal."
+
+  grid_uv_time1:
+    address: 0xE405
+    hex_address: "E405"
+    decimal_address: 58373
+    name: "GridUVTime1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid UV Level 1 delay time (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 210
+      translations:
+        en:
+          title: "Grid UV Level 1 Delay"
+          description: "Milliseconds to wait before disconnecting on UV Level 1"
+          hint: "CRITICAL: Must match grid code. Value × 20ms."
+
+  grid_uv_resume_level1:
+    address: 0xE406
+    hex_address: "E406"
+    decimal_address: 58374
+    name: "GridUVResumLevel1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 0
+    max: 270
+    default: 198
+    description: "Grid voltage to resume after UV Level 1 fault"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 215
+      translations:
+        en:
+          title: "Grid UV Level 1 Recovery"
+          description: "Voltage to resume after under-voltage fault"
+          hint: "CRITICAL: Must be higher than UV threshold."
+
+  grid_uv_resume_time1:
+    address: 0xE407
+    hex_address: "E407"
+    decimal_address: 58375
+    name: "GridUVResumTime1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid UV Level 1 recovery delay (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 220
+      translations:
+        en:
+          title: "Grid UV Level 1 Recovery Delay"
+          description: "Delay before reconnecting after UV recovery"
+          hint: "Value × 20ms."
+
+  # Grid Under-Voltage Protection Level 2
+  grid_uv_level2:
+    address: 0xE408
+    hex_address: "E408"
+    decimal_address: 58376
+    name: "GridUVLevel2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 0
+    max: 270
+    default: 184
+    description: "Grid under-voltage protection threshold (Level 2)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 225
+      translations:
+        en:
+          title: "Grid Under-Voltage Level 2"
+          description: "Second UV protection level (more severe)"
+          hint: "CRITICAL: Typically lower than Level 1 for faster disconnect."
+
+  grid_uv_time2:
+    address: 0xE409
+    hex_address: "E409"
+    decimal_address: 58377
+    name: "GridUVTime2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid UV Level 2 delay time (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 230
+      translations:
+        en:
+          title: "Grid UV Level 2 Delay"
+          description: "Delay for UV Level 2 protection"
+          hint: "Value × 20ms. Typically shorter than Level 1."
+
+  grid_uv_resume_level2:
+    address: 0xE40A
+    hex_address: "E40A"
+    decimal_address: 58378
+    name: "GridUVResumLevel2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 0
+    max: 270
+    default: 198
+    description: "Grid voltage to resume after UV Level 2 fault"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 235
+      translations:
+        en:
+          title: "Grid UV Level 2 Recovery"
+          description: "Voltage to resume after Level 2 UV fault"
+          hint: "Must be higher than UV Level 2 threshold."
+
+  grid_uv_resume_time2:
+    address: 0xE40B
+    hex_address: "E40B"
+    decimal_address: 58379
+    name: "GridUVResumTime2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid UV Level 2 recovery delay (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 240
+      translations:
+        en:
+          title: "Grid UV Level 2 Recovery Delay"
+          description: "Delay before reconnecting after UV Level 2 recovery"
+          hint: "Value × 20ms."
+
+  # Grid Over-Voltage Protection Level 1
+  grid_ov_level1:
+    address: 0xE40C
+    hex_address: "E40C"
+    decimal_address: 58380
+    name: "GridOVLevel1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 0
+    max: 270
+    default: 280
+    description: "Grid over-voltage protection threshold (Level 1)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 245
+      translations:
+        en:
+          title: "Grid Over-Voltage Level 1"
+          description: "Disconnect when grid voltage exceeds this (Level 1)"
+          hint: "CRITICAL: Must match grid code. Typical: 110-120% of nominal."
+
+  grid_ov_time1:
+    address: 0xE40D
+    hex_address: "E40D"
+    decimal_address: 58381
+    name: "GridOVTime1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid OV Level 1 delay time (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 250
+      translations:
+        en:
+          title: "Grid OV Level 1 Delay"
+          description: "Delay before disconnecting on OV Level 1"
+          hint: "Value × 20ms."
+
+  grid_ov_resume_level1:
+    address: 0xE40E
+    hex_address: "E40E"
+    decimal_address: 58382
+    name: "GridOVResumLevel1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 0
+    max: 320
+    default: 270
+    description: "Grid voltage to resume after OV Level 1 fault"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 255
+      translations:
+        en:
+          title: "Grid OV Level 1 Recovery"
+          description: "Voltage to resume after over-voltage fault"
+          hint: "Must be lower than OV threshold."
+
+  grid_ov_resume_time1:
+    address: 0xE40F
+    hex_address: "E40F"
+    decimal_address: 58383
+    name: "GridOVResumTime1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid OV Level 1 recovery delay (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 260
+      translations:
+        en:
+          title: "Grid OV Level 1 Recovery Delay"
+          description: "Delay before reconnecting after OV recovery"
+          hint: "Value × 20ms."
+
+  # Grid Over-Voltage Protection Level 2
+  grid_ov_level2:
+    address: 0xE410
+    hex_address: "E410"
+    decimal_address: 58384
+    name: "GridOVLevel2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 0
+    max: 320
+    default: 280
+    description: "Grid over-voltage protection threshold (Level 2)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 265
+      translations:
+        en:
+          title: "Grid Over-Voltage Level 2"
+          description: "Second OV protection level (more severe)"
+          hint: "Typically higher than Level 1 for immediate disconnect."
+
+  grid_ov_time2:
+    address: 0xE411
+    hex_address: "E411"
+    decimal_address: 58385
+    name: "GridOVTime2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid OV Level 2 delay time (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 270
+      translations:
+        en:
+          title: "Grid OV Level 2 Delay"
+          description: "Delay for OV Level 2 protection"
+          hint: "Typically very short for severe OV."
+
+  grid_ov_resume_level2:
+    address: 0xE412
+    hex_address: "E412"
+    decimal_address: 58386
+    name: "GridOVResumLevel2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 0
+    max: 320
+    default: 270
+    description: "Grid voltage to resume after OV Level 2 fault"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 275
+      translations:
+        en:
+          title: "Grid OV Level 2 Recovery"
+          description: "Voltage to resume after Level 2 OV fault"
+          hint: "Must be lower than OV Level 2 threshold."
+
+  grid_ov_resume_time2:
+    address: 0xE413
+    hex_address: "E413"
+    decimal_address: 58387
+    name: "GridOVResumTime2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid OV Level 2 recovery delay (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 280
+      translations:
+        en:
+          title: "Grid OV Level 2 Recovery Delay"
+          description: "Delay before reconnecting after OV Level 2 recovery"
+          hint: "Value × 20ms."
+
+  # Grid Under-Frequency Protection Level 1
+  grid_uf_level1:
+    address: 0xE414
+    hex_address: "E414"
+    decimal_address: 58388
+    name: "GridUFLevel1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    min: 0
+    max: 65
+    default: 47
+    description: "Grid under-frequency protection threshold (Level 1)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 285
+      translations:
+        en:
+          title: "Grid Under-Frequency Level 1"
+          description: "Disconnect when grid frequency drops below this"
+          hint: "CRITICAL: Must match grid code. Typical: 47Hz (50Hz grid), 57Hz (60Hz grid)."
+
+  grid_uf_time1:
+    address: 0xE415
+    hex_address: "E415"
+    decimal_address: 58389
+    name: "GridUFTime1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid UF Level 1 delay time (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 290
+      translations:
+        en:
+          title: "Grid UF Level 1 Delay"
+          description: "Delay before disconnecting on UF Level 1"
+          hint: "Value × 20ms."
+
+  grid_uf_resume_level1:
+    address: 0xE416
+    hex_address: "E416"
+    decimal_address: 58390
+    name: "GridUFResumLevel1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    min: 0
+    max: 65
+    default: 48
+    description: "Grid frequency to resume after UF Level 1 fault"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 295
+      translations:
+        en:
+          title: "Grid UF Level 1 Recovery"
+          description: "Frequency to resume after under-frequency fault"
+          hint: "Must be higher than UF threshold."
+
+  grid_uf_resume_time1:
+    address: 0xE417
+    hex_address: "E417"
+    decimal_address: 58391
+    name: "GridUFResumTime1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid UF Level 1 recovery delay (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 300
+      translations:
+        en:
+          title: "Grid UF Level 1 Recovery Delay"
+          description: "Delay before reconnecting after UF recovery"
+          hint: "Value × 20ms."
+
+  # Grid Under-Frequency Protection Level 2
+  grid_uf_level2:
+    address: 0xE418
+    hex_address: "E418"
+    decimal_address: 58392
+    name: "GridUFLevel2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    min: 0
+    max: 65
+    default: 47
+    description: "Grid under-frequency protection threshold (Level 2)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 305
+      translations:
+        en:
+          title: "Grid Under-Frequency Level 2"
+          description: "Second UF protection level"
+          hint: "Typically lower than Level 1 for faster disconnect."
+
+  grid_uf_time2:
+    address: 0xE419
+    hex_address: "E419"
+    decimal_address: 58393
+    name: "GridUFTime2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid UF Level 2 delay time (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 310
+      translations:
+        en:
+          title: "Grid UF Level 2 Delay"
+          description: "Delay for UF Level 2 protection"
+          hint: "Typically shorter than Level 1."
+
+  grid_uf_resume_level2:
+    address: 0xE41A
+    hex_address: "E41A"
+    decimal_address: 58394
+    name: "GridUFResumLevel2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    min: 0
+    max: 65
+    default: 48
+    description: "Grid frequency to resume after UF Level 2 fault"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 315
+      translations:
+        en:
+          title: "Grid UF Level 2 Recovery"
+          description: "Frequency to resume after Level 2 UF fault"
+          hint: "Must be higher than UF Level 2 threshold."
+
+  grid_uf_resume_time2:
+    address: 0xE41B
+    hex_address: "E41B"
+    decimal_address: 58395
+    name: "GridUFResumTime2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid UF Level 2 recovery delay (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 320
+      translations:
+        en:
+          title: "Grid UF Level 2 Recovery Delay"
+          description: "Delay before reconnecting after UF Level 2 recovery"
+          hint: "Value × 20ms."
+
+  # Grid Over-Frequency Protection Level 1
+  grid_of_level1:
+    address: 0xE41C
+    hex_address: "E41C"
+    decimal_address: 58396
+    name: "GridOFLevel1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    min: 0
+    max: 65
+    default: 52.5
+    description: "Grid over-frequency protection threshold (Level 1)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 325
+      translations:
+        en:
+          title: "Grid Over-Frequency Level 1"
+          description: "Disconnect when grid frequency exceeds this"
+          hint: "CRITICAL: Must match grid code. Typical: 52.5Hz (50Hz grid), 62Hz (60Hz grid)."
+
+  grid_of_time1:
+    address: 0xE41D
+    hex_address: "E41D"
+    decimal_address: 58397
+    name: "GridOFTime1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid OF Level 1 delay time (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 330
+      translations:
+        en:
+          title: "Grid OF Level 1 Delay"
+          description: "Delay before disconnecting on OF Level 1"
+          hint: "Value × 20ms."
+
+  grid_of_resume_level1:
+    address: 0xE41E
+    hex_address: "E41E"
+    decimal_address: 58398
+    name: "GridOFResumLevel1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    min: 0
+    max: 65
+    default: 51
+    description: "Grid frequency to resume after OF Level 1 fault"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 335
+      translations:
+        en:
+          title: "Grid OF Level 1 Recovery"
+          description: "Frequency to resume after over-frequency fault"
+          hint: "Must be lower than OF threshold."
+
+  grid_of_resume_time1:
+    address: 0xE41F
+    hex_address: "E41F"
+    decimal_address: 58399
+    name: "GridOFResumTime1"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid OF Level 1 recovery delay (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 340
+      translations:
+        en:
+          title: "Grid OF Level 1 Recovery Delay"
+          description: "Delay before reconnecting after OF recovery"
+          hint: "Value × 20ms."
+
+  # Grid Over-Frequency Protection Level 2
+  grid_of_level2:
+    address: 0xE420
+    hex_address: "E420"
+    decimal_address: 58400
+    name: "GridOFLevel2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    min: 0
+    max: 65
+    default: 52.5
+    description: "Grid over-frequency protection threshold (Level 2)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 345
+      translations:
+        en:
+          title: "Grid Over-Frequency Level 2"
+          description: "Second OF protection level"
+          hint: "Typically higher than Level 1 for immediate disconnect."
+
+  grid_of_time2:
+    address: 0xE421
+    hex_address: "E421"
+    decimal_address: 58401
+    name: "GridOFTime2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid OF Level 2 delay time (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 350
+      translations:
+        en:
+          title: "Grid OF Level 2 Delay"
+          description: "Delay for OF Level 2 protection"
+          hint: "Typically very short for severe OF."
+
+  grid_of_resume_level2:
+    address: 0xE422
+    hex_address: "E422"
+    decimal_address: 58402
+    name: "GridOFResumLevel2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    min: 0
+    max: 65
+    default: 51
+    description: "Grid frequency to resume after OF Level 2 fault"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 355
+      translations:
+        en:
+          title: "Grid OF Level 2 Recovery"
+          description: "Frequency to resume after Level 2 OF fault"
+          hint: "Must be lower than OF Level 2 threshold."
+
+  grid_of_resume_time2:
+    address: 0xE423
+    hex_address: "E423"
+    decimal_address: 58403
+    name: "GridOFResumTime2"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 20
+    unit: "ms"
+    min: 20
+    max: 600000
+    default: 120
+    description: "Grid OF Level 2 recovery delay (×20ms)"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 360
+      translations:
+        en:
+          title: "Grid OF Level 2 Recovery Delay"
+          description: "Delay before reconnecting after OF Level 2 recovery"
+          hint: "Value × 20ms."
+
+  ct_ratio:
+    address: 0xE42B
+    hex_address: "E42B"
+    decimal_address: 58411
+    name: "ExCtRatio"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 5000
+    default: 1000
+    description: "Current transformer (CT) ratio for power measurement"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 150
+      translations:
+        en:
+          title: "CT Ratio"
+          description: "Current transformer ratio for accurate power measurement"
+          hint: "Must match installed CT. Example: 100A CT with 50mA output = 2000:1 ratio."
+
+  zero_export_power:
+    address: 0xE42C
+    hex_address: "E42C"
+    decimal_address: 58412
+    name: "ZeroExportPower"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    min: 0
+    max: 500
+    default: 20
+    description: "Target power for anti-reverse (zero export) function"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "warning"
+      display_order: 40
+      translations:
+        en:
+          title: "Zero Export Power"
+          description: "Target grid power in anti-export mode"
+          hint: "For zero-export systems. Small positive value prevents accidental export."
+
+  reconnect_power_ramp:
+    address: 0xE42D
+    hex_address: "E42D"
+    decimal_address: 58413
+    name: "ReConnPowerRamp"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "s"
+    min: 0
+    max: 1000
+    default: 60
+    description: "Power ramp-up rate after grid reconnection"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 155
+      translations:
+        en:
+          title: "Reconnect Power Ramp"
+          description: "Seconds to ramp to full power after grid reconnect"
+          hint: "Grid-tie soft-start. Typical: 60 seconds."
+
+  watt_pf_curve_enable:
+    address: 0xE42E
+    hex_address: "E42E"
+    decimal_address: 58414
+    name: "WattPFCurveEnable"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Enable Watt-PF curve (power-dependent power factor)"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 160
+      translations:
+        en:
+          title: "Watt-PF Curve"
+          description: "Vary power factor based on output power"
+          hint: "Advanced grid-tie feature. Consult grid code requirements."
+      options:
+        0:
+          label: "Disabled"
+          description: "Fixed power factor"
+        1:
+          label: "Enabled"
+          description: "Power-dependent PF curve"
+
+  hvrt_lvrt_enable:
+    address: 0xE42F
+    hex_address: "E42F"
+    decimal_address: 58415
+    name: "HLVRTEnable"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Enable High/Low Voltage Ride-Through (grid-tie)"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 45
+      translations:
+        en:
+          title: "HVRT/LVRT Enable"
+          description: "Stay connected during grid voltage fluctuations"
+          hint: "CRITICAL: Grid-tie only. Required by some grid codes. Prevents nuisance disconnections."
+      options:
+        0:
+          label: "Disabled"
+          description: "Disconnect on voltage deviation"
+        1:
+          label: "Enabled"
+          description: "Ride through voltage events"
+
+  afci_enable:
+    address: 0xE431
+    hex_address: "E431"
+    decimal_address: 58417
+    name: "AfciEnable"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Enable Arc Fault Circuit Interrupter detection"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 165
+      translations:
+        en:
+          title: "AFCI Enable"
+          description: "Arc fault detection (NEC requirement in US)"
+          hint: "Safety feature. Required by US NEC for rooftop PV systems."
+      options:
+        0:
+          label: "Disabled"
+          description: "No arc fault detection"
+        1:
+          label: "Enabled"
+          description: "Arc fault protection active"
+
+  normal_connect_delay:
+    address: 0xE432
+    hex_address: "E432"
+    decimal_address: 58418
+    name: "NormalConnDlyTsec"
+    type: read_write
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "s"
+    min: 0
+    max: 1000
+    default: 30
+    description: "Delay before connecting to grid (normal operation)"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 170
+      translations:
+        en:
+          title: "Normal Connection Delay"
+          description: "Seconds to wait before grid connection"
+          hint: "Grid-tie safety delay. Allows grid to stabilize."
+
+  normal_connect_power_ramp:
+    address: 0xE433
+    hex_address: "E433"
+    decimal_address: 58419
+    name: "NormalConnPwrRampTsec"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "s"
+    min: 0
+    max: 1000
+    default: 30
+    description: "Power ramp rate during normal grid connection"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 175
+      translations:
+        en:
+          title: "Normal Connection Ramp"
+          description: "Seconds to ramp to full power on connection"
+          hint: "Grid-tie soft-start for normal connections."
+
+  grid_connect_voltage_low:
+    address: 0xE434
+    hex_address: "E434"
+    decimal_address: 58420
+    name: "ConnVoltLow"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 0
+    max: 320
+    default: 110
+    description: "Minimum grid voltage to allow connection"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 50
+      translations:
+        en:
+          title: "Grid Connect Voltage Low"
+          description: "Minimum voltage required for grid connection"
+          hint: "CRITICAL: Must match grid code. Won't connect if grid voltage below this."
+
+  grid_connect_voltage_high:
+    address: 0xE435
+    hex_address: "E435"
+    decimal_address: 58421
+    name: "ConnVoltHigh"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    min: 0
+    max: 320
+    default: 140
+    description: "Maximum grid voltage to allow connection"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 55
+      translations:
+        en:
+          title: "Grid Connect Voltage High"
+          description: "Maximum voltage required for grid connection"
+          hint: "CRITICAL: Must match grid code. Won't connect if grid voltage above this."
+
+  grid_connect_frequency_low:
+    address: 0xE436
+    hex_address: "E436"
+    decimal_address: 58422
+    name: "ConnFreqLow"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    min: 40
+    max: 70
+    default: 60
+    description: "Minimum grid frequency to allow connection"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 60
+      translations:
+        en:
+          title: "Grid Connect Frequency Low"
+          description: "Minimum frequency required for grid connection"
+          hint: "CRITICAL: Must match grid code. Typical: 59.3Hz (60Hz grid), 49.5Hz (50Hz grid)."
+
+  grid_connect_frequency_high:
+    address: 0xE437
+    hex_address: "E437"
+    decimal_address: 58423
+    name: "ConnFreqHigh"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    min: 40
+    max: 70
+    default: 60
+    description: "Maximum grid frequency to allow connection"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 65
+      translations:
+        en:
+          title: "Grid Connect Frequency High"
+          description: "Maximum frequency required for grid connection"
+          hint: "CRITICAL: Must match grid code. Typical: 60.5Hz (60Hz grid), 50.2Hz (50Hz grid)."
+
+  grid_reconnect_time:
+    address: 0xE424
+    hex_address: "E424"
+    decimal_address: 58404
+    name: "ReConnectGridTime"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "s"
+    min: 0
+    max: 600
+    default: 60
+    description: "Delay before attempting grid reconnection after fault"
+    config_flow:
+      page: "expert"
+      danger_level: "safe"
+      display_order: 180
+      translations:
+        en:
+          title: "Grid Reconnect Delay"
+          description: "Seconds to wait before reconnecting after grid fault"
+          hint: "Grid-tie safety. Allows grid to stabilize after fault. Typical: 60-300s."
+
+  isolation_check_enable:
+    address: 0xE425
+    hex_address: "E425"
+    decimal_address: 58405
+    name: "IsoCheckEn"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 1
+    description: "Enable insulation resistance detection (grid-tie)"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 185
+      translations:
+        en:
+          title: "Insulation Check Enable"
+          description: "Enable ground fault/insulation monitoring"
+          hint: "Grid-tie safety. Required by most grid codes."
+      options:
+        0:
+          label: "Disabled"
+          description: "No insulation check"
+        1:
+          label: "Enabled"
+          description: "Monitor insulation resistance"
+
+  isolation_protect_threshold:
+    address: 0xE426
+    hex_address: "E426"
+    decimal_address: 58406
+    name: "IsoProtectPoint"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "kΩ"
+    min: 10
+    max: 65535
+    default: 15
+    description: "Minimum insulation resistance threshold"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 190
+      translations:
+        en:
+          title: "Insulation Threshold"
+          description: "Minimum insulation resistance (kilo-ohms)"
+          hint: "Shuts down if insulation below this. Typical: 15-100kΩ per grid code."
+
+  grid_function_enable:
+    address: 0xE427
+    hex_address: "E427"
+    decimal_address: 58407
+    name: "GridFuncEnable"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 65535
+    default: 0
+    description: "Grid function enable bitfield"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 195
+      translations:
+        en:
+          title: "Grid Function Enable"
+          description: "Bitfield for enabling various grid functions"
+          hint: "CRITICAL: Advanced setting. Consult manual for bit definitions."
+
+  grid_standard_user_mode:
+    address: 0xE428
+    hex_address: "E428"
+    decimal_address: 58408
+    name: "GridStandUserMode"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 1
+    default: 0
+    description: "Grid standard user mode selection"
+    config_flow:
+      page: "expert"
+      danger_level: "critical"
+      display_order: 200
+      translations:
+        en:
+          title: "Grid Standard Mode"
+          description: "User vs factory grid standard mode"
+          hint: "CRITICAL: Allows custom grid parameters. Use with extreme caution."
+      options:
+        0:
+          label: "Factory Mode"
+          description: "Use factory grid standard settings"
+        1:
+          label: "User Mode"
+          description: "Use custom grid parameters"
+
+  battery_for_grid_enable:
+    address: 0xE42A
+    hex_address: "E42A"
+    decimal_address: 58410
+    name: "BattForGridPowerEn"
+    type: read_write
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    min: 0
+    max: 3
+    default: 0
+    description: "Battery participation in grid-tie operation"
+    config_flow:
+      page: "inverter_output"
+      danger_level: "critical"
+      display_order: 70
+      translations:
+        en:
+          title: "Battery Grid Participation"
+          description: "How battery participates in grid-tie mode"
+          hint: "CRITICAL: Controls battery discharge during grid-tie. Check utility agreement."
+      options:
+        0:
+          label: "No Discharge"
+          description: "Battery doesn't discharge to grid"
+        1:
+          label: "UPS Loads Only"
+          description: "Battery only for backup loads"
+        2:
+          label: "Home Loads"
+          description: "Battery discharges to home loads"
+        3:
+          label: "Grid Export"
+          description: "Battery participates in grid export/sales"
+
+  # ==========================================================================
+  # END GRID-CONNECTED PARAMETERS
+  # ==========================================================================
+
+  # Control registers (for selects)
+  energy_priority:
+    address: 0xE204
+    hex_address: "E204"
+    decimal_address: 57860
+    name: "OutputPriority"
+    type: read_write
+    length: 1
+    data_type: uint16
+    min: 0
+    max: 2
+    description: "Output priority setting"
+    values:
+      0: "Solar priority"
+      1: "Line (AC) priority"
+      2: "SBU (Solar-Battery-Utility)"
+    config_flow:
+      page: "expert"
+      danger_level: "warning"
+      display_order: 10
+      translations:
+        en:
+          title: "Output Priority"
+          description: "Energy source priority for powering loads"
+          hint: "SBU (Solar-Battery-Utility) is recommended for most off-grid systems"
+      options:
+        0:
+          label: "Solar Priority"
+          description: "Use solar first, then utility, battery last"
+        1:
+          label: "Utility Priority"
+          description: "Use utility (grid) first, then solar and battery"
+        2:
+          label: "SBU Priority"
+          description: "Solar first, then battery, then utility as backup"
+
+  # Monitoring registers (for sensors)
+  battery_soc:
+    address: 0x0100
+    name: "BatSoc"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "%"
+    description: "Battery state of charge (SOC)"
+
+  battery_voltage_sensor:
+    address: 0x0101
+    name: "BatVolt"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    description: "Battery voltage sensor reading"
+
+  battery_current:
+    address: 0x0102
+    name: "ChargeCurr"
+    type: read
+    length: 1
+    data_type: int16
+    scaling: 0.1
+    unit: "A"
+    description: "Battery current. >0: discharging, <0: charging"
+
+  battery_temperature:
+    address: 0x0103
+    name: "DeviceBatTemper"
+    type: read
+    length: 1
+    data_type: int16
+    scaling: 0.1
+    unit: "°C"
+    description: "Battery temperature"
+
+  pv1_voltage:
+    address: 0x0107
+    name: "Pv1Volt"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    description: "PV panel 1 voltage"
+
+  pv1_current:
+    address: 0x0108
+    name: "Pv1Curr"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "PV panel 1 current"
+
+  pv1_power:
+    address: 0x0109
+    name: "Pv1ChargePower"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    description: "PV panel 1 charging power"
+
+  pv_total_power:
+    address: 0x010A
+    name: "PvTotalPower"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    description: "Total PV power"
+
+  charge_power_total:
+    address: 0x010E
+    name: "ChargePower"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    description: "Total charging power (PV + AC combined)"
+
+  # PV2 sensors (for dual-PV systems)
+  pv2_voltage:
+    address: 0x010F
+    name: "Pv2Volt"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    description: "PV panel 2 voltage (dual-PV systems only)"
+
+  pv2_current:
+    address: 0x0110
+    name: "Pv2Curr"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "PV panel 2 current (dual-PV systems only)"
+
+  pv2_power:
+    address: 0x0111
+    name: "Pv2ChargePower"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    description: "PV panel 2 charging power (dual-PV systems only)"
+
+  charge_state:
+    address: 0x010B
+    name: "ChargeState"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    description: "Battery charging state"
+    values:
+      0: "Charge off"
+      1: "Quick charge"
+      2: "Const voltage charge"
+      4: "Float charge"
+      5: "Reserved"
+      6: "Li battery activate"
+      8: "Full"
+
+  # Fault detection block (0x0200-0x0203)
+  fault_code_0:
+    address: 0x0200
+    name: "FaultCode0"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    description: "Fault code register 0"
+
+  fault_code_1:
+    address: 0x0201
+    name: "FaultCode1"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    description: "Fault code register 1"
+
+  fault_code_2:
+    address: 0x0202
+    name: "FaultCode2"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    description: "Fault code register 2"
+
+  fault_code_3:
+    address: 0x0203
+    name: "FaultCode3"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    description: "Fault code register 3"
+
+  # System DateTime (3 registers for year/month/day/hour/minute/second)
+  system_datetime_year_month:
+    address: 0x020C
+    name: "SystemDateTimeYearMonth"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    description: "System datetime - high byte: year, low byte: month"
+
+  system_datetime_day_hour:
+    address: 0x020D
+    name: "SystemDateTimeDayHour"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    description: "System datetime - high byte: day, low byte: hour"
+
+  system_datetime_minute_second:
+    address: 0x020E
+    name: "SystemDateTimeMinuteSecond"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    description: "System datetime - high byte: minute, low byte: second"
+
+  grid_on_countdown:
+    address: 0x020F
+    name: "GridOnCountdown"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "s"
+    description: "Countdown timer for grid connection in seconds"
+
+  machine_state:
+    address: 0x0210
+    name: "MachineState"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: ""
+    description: "Machine current state"
+    values:
+      0: "Power-on delay / Initialization"
+      1: "Standby state"
+      2: "Initialization / AC power operation"
+      3: "Soft start / Inverter operation"
+      4: "AC power operation"
+      5: "Inverter operation"
+      6: "Inverter to AC power"
+      7: "AC power to inverter"
+      8: "Battery activation"
+      9: "Manual shutdown"
+      10: "Fault"
+
+  total_bus_voltage:
+    address: 0x0212
+    name: "TotalBusVoltage"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    description: "Total DC bus voltage"
+
+  grid_voltage:
+    address: 0x0213
+    name: "GridVoltA"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    description: "Grid voltage"
+
+  grid_current:
+    address: 0x0214
+    name: "GridCurrentA"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "Grid current"
+
+  grid_frequency:
+    address: 0x0215
+    name: "GridFreq"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.01
+    unit: "Hz"
+    description: "AC power frequency"
+
+  inverter_voltage:
+    address: 0x0216
+    name: "InvVoltA"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "V"
+    description: "Inverter output voltage"
+
+  inverter_current:
+    address: 0x0217
+    name: "InvCurrentA"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "Inverter output current"
+
+  inverter_frequency:
+    address: 0x0218
+    name: "InvFreq"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "Hz"
+    description: "Inverter output frequency"
+
+  load_current:
+    address: 0x0219
+    name: "LoadCurrA"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "Load side phase-A current"
+
+  load_active_power:
+    address: 0x021B
+    name: "LoadActivePowerA"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    description: "Load active power"
+
+  ac_charge_current:
+    address: 0x021E
+    name: "LineChgCurr"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "AC charging current on battery side"
+
+  pv_charge_current_actual:
+    address: 0x0224
+    name: "Ibuck1"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "PV charging current on battery side (actual reading)"
+
+  grid_power:
+    address: 0x023A
+    name: "GridActivePowerA"
+    type: read
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "W"
+    description: "Grid active power phase A (positive=exporting to grid, negative=importing from grid)"
+
+  grid_power_b:
+    address: 0x023B
+    name: "GridActivePowerB"
+    type: read
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "W"
+    description: "Grid active power phase B (3-phase systems only)"
+
+  grid_power_c:
+    address: 0x023C
+    name: "GridActivePowerC"
+    type: read
+    length: 1
+    data_type: int16
+    scaling: 1
+    unit: "W"
+    description: "Grid active power phase C (3-phase systems only)"
+
+  load_power:
+    address: 0x0240
+    name: "HomeLoadActivePowerA"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    description: "Home load active power consumption phase A"
+
+  load_power_b_home:
+    address: 0x0241
+    name: "HomeLoadActivePowerB"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    description: "Home load active power consumption phase B (3-phase systems only)"
+
+  load_power_c_home:
+    address: 0x0242
+    name: "HomeLoadActivePowerC"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    description: "Home load active power consumption phase C (3-phase systems only)"
+
+  load_ratio:
+    address: 0x021F
+    name: "LoadRatioA"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "%"
+    description: "Load ratio"
+
+  battery_temp_heatsink:
+    address: 0x0220
+    name: "Tempera"
+    type: read
+    length: 1
+    data_type: int16
+    scaling: 0.1
+    unit: "°C"
+    description: "Battery area heatsink temperature (DC-DC converter)"
+
+  inverter_temperature:
+    address: 0x0221
+    name: "InvTemperature"
+    type: read
+    length: 1
+    data_type: int16
+    scaling: 0.1
+    unit: "°C"
+    description: "Inverter heatsink temperature"
+
+  transformer_temperature:
+    address: 0x0222
+    name: "TransformerTemperature"
+    type: read
+    length: 1
+    data_type: int16
+    scaling: 0.1
+    unit: "°C"
+    description: "Transformer heatsink temperature"
+
+  ambient_temperature:
+    address: 0x0223
+    name: "AmbientTemperature"
+    type: read
+    length: 1
+    data_type: int16
+    scaling: 0.1
+    unit: "°C"
+    description: "Enclosure ambient temperature"
+
+  # Split-phase bus voltage monitoring (US L1/L2 systems)
+  positive_bus_voltage:
+    address: 0x0228
+    name: "PositiveBusVoltage"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    description: "Positive DC bus voltage (split-phase systems only)"
+
+  negative_bus_voltage:
+    address: 0x0229
+    name: "NegativeBusVoltage"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    description: "Negative DC bus voltage (split-phase systems only)"
+
+  # Multi-phase grid monitoring (3-phase systems)
+  grid_voltage_b:
+    address: 0x022A
+    name: "GridVoltB"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    description: "Grid voltage phase B (3-phase systems only)"
+
+  grid_voltage_c:
+    address: 0x022B
+    name: "GridVoltC"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "V"
+    description: "Grid voltage phase C (3-phase systems only)"
+
+  inverter_voltage_b:
+    address: 0x022C
+    name: "InvVoltB"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "V"
+    description: "Inverter output voltage phase B (3-phase systems only)"
+
+  inverter_voltage_c:
+    address: 0x022D
+    name: "InvVoltC"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "V"
+    description: "Inverter output voltage phase C (3-phase systems only)"
+
+  inverter_current_b:
+    address: 0x022E
+    name: "InvCurrentB"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "Inverter output current phase B (3-phase systems only)"
+
+  inverter_current_c:
+    address: 0x022F
+    name: "InvCurrentC"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "Inverter output current phase C (3-phase systems only)"
+
+  load_current_b:
+    address: 0x0230
+    name: "LoadCurrentB"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "Load side current phase B (3-phase systems only)"
+
+  load_current_c:
+    address: 0x0231
+    name: "LoadCurrentC"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "Load side current phase C (3-phase systems only)"
+
+  load_power_b:
+    address: 0x0232
+    name: "LoadActivePowerB"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    description: "Load active power phase B (3-phase systems only)"
+
+  load_power_c:
+    address: 0x0233
+    name: "LoadActivePowerC"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "W"
+    description: "Load active power phase C (3-phase systems only)"
+
+  grid_current_b:
+    address: 0x0238
+    name: "GridCurrentB"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "AC grid current phase B (3-phase systems only)"
+
+  grid_current_c:
+    address: 0x0239
+    name: "GridCurrentC"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "A"
+    description: "AC grid current phase C (3-phase systems only)"
+
+  pv_energy_today:
+    address: 0xF02F
+    name: "GeneratEnergyToday"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "kWh"
+    description: "Total PV power generation today"
+
+  load_energy_today:
+    address: 0xF030
+    name: "UsedEnergyToday"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "kWh"
+    description: "Total load power consumption today"
+
+  battery_charge_ah_today:
+    address: 0xF02D
+    name: "BatChgAHToday"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "AH"
+    description: "Total battery charging today (AH)"
+
+  battery_discharge_ah_today:
+    address: 0xF02E
+    name: "BatDischgAHToday"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "AH"
+    description: "Total battery discharging today (AH)"
+
+  pv_energy_total:
+    address: 0xF038
+    name: "GeneratEnergyTotal"
+    type: read
+    length: 2
+    data_type: uint32
+    scaling: 0.1
+    unit: "kWh"
+    description: "Cumulative PV power generation"
+
+  load_energy_total:
+    address: 0xF03A
+    name: "UsedEnergyTotal"
+    type: read
+    length: 2
+    data_type: uint32
+    scaling: 0.1
+    unit: "kWh"
+    description: "Cumulative load power consumption"
+
+  grid_export_energy_today:
+    address: 0xF02C
+    name: "GeneratEnergyToGridToday"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 0.1
+    unit: "kWh"
+    description: "Total energy exported to grid today (grid-tied systems)"
+
+  work_days_total:
+    address: 0xF031
+    name: "WorkDaysTotal"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "days"
+    description: "Total operating days"
+
+  grid_export_energy_total:
+    address: 0xF032
+    name: "GeneratEnergyToGridTotal"
+    type: read
+    length: 2
+    data_type: uint32
+    scaling: 0.1
+    unit: "kWh"
+    description: "Cumulative energy exported to grid (grid-tied systems)"
+
+  battery_charge_ah_total:
+    address: 0xF034
+    name: "BatChgAHTotal"
+    type: read
+    length: 2
+    data_type: uint32
+    scaling: 1
+    unit: "AH"
+    description: "Cumulative battery charging (amp-hours)"
+
+  battery_discharge_ah_total:
+    address: 0xF036
+    name: "BatDischgAHTotal"
+    type: read
+    length: 2
+    data_type: uint32
+    scaling: 1
+    unit: "AH"
+    description: "Cumulative battery discharging (amp-hours)"
+
+  ac_charge_energy_today:
+    address: 0xF03C
+    name: "LineChgEnergyTday"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "AH"
+    description: "AC charging energy today (amp-hours)"
+
+  inverter_work_time_today:
+    address: 0xF03E
+    name: "InvWorkTimeToday"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "min"
+    description: "Inverter work time today (minutes)"
+
+  bypass_work_time_today:
+    address: 0xF03F
+    name: "BypassWorkTimeToday"
+    type: read
+    length: 1
+    data_type: uint16
+    scaling: 1
+    unit: "min"
+    description: "Bypass work time today (minutes)"
+
+# ============================================================================
+# ENTITY DEFAULTS
+# ============================================================================
+defaults:
+  sensor:
+    state_class: measurement
+    enabled_by_default: true
+  switch:
+    optimistic: false
+    enabled_by_default: true
+  select:
+    enabled_by_default: true
+
+# ============================================================================
+# SENSOR ENTITIES
+# ============================================================================
+sensors:
+  # --------------------------------------------------------------------------
+  # PHASE 2 - PILOT ENTITIES (VALIDATED)
+  # --------------------------------------------------------------------------
+
+  # Simple coordinator data sensor
+  - entity_id: battery_soc
+    name: Battery SOC
+    description: Battery state of charge percentage showing current battery capacity level
+    source_type: coordinator_data
+    data_key: battery_soc
+    device_class: battery
+    state_class: measurement
+    unit_of_measurement: "%"
+    icon: mdi:battery
+
+  # Power sensor with device class
+  - entity_id: pv_power
+    name: PV Power
+    description: Current total solar panel power generation in watts
+    source_type: coordinator_data
+    data_key: pv_total_power
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:solar-power
+
+  # Sensor with template attributes
+  - entity_id: grid_power
+    name: Grid Power
+    description: Current grid power flow - positive when importing, negative when exporting
+    source_type: coordinator_data
+    data_key: grid_power
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:transmission-tower
+    attributes:
+      direction: >
+        {% if value is none %}unknown{% elif value > 0 %}importing{% elif value < 0 %}exporting{% else %}balanced{% endif %}
+
+  # --------------------------------------------------------------------------
+  # PHASE 3 - SIMPLE SENSORS BATCH 1
+  # --------------------------------------------------------------------------
+
+  - entity_id: load_power
+    name: Load Power
+    description: Total power consumption by connected loads and appliances
+    source_type: coordinator_data
+    data_key: load_power
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:home-lightning-bolt
+
+  - entity_id: battery_voltage
+    name: Battery Voltage
+    description: Current battery bank voltage reading
+    source_type: coordinator_data
+    data_key: battery_voltage_sensor
+    device_class: voltage
+    state_class: measurement
+    unit_of_measurement: V
+    icon: mdi:lightning-bolt
+
+  - entity_id: inverter_temperature
+    name: Inverter Temperature
+    description: Internal temperature of the inverter unit
+    source_type: coordinator_data
+    data_key: inverter_temperature
+    device_class: temperature
+    state_class: measurement
+    unit_of_measurement: °C
+    icon: mdi:thermometer
+
+  - entity_id: battery_temperature
+    name: Battery Temperature
+    description: Current battery temperature for thermal monitoring
+    source_type: coordinator_data
+    data_key: battery_temperature
+    device_class: temperature
+    state_class: measurement
+    unit_of_measurement: °C
+    icon: mdi:thermometer-lines
+
+  - entity_id: grid_voltage
+    name: Grid Voltage
+    description: AC grid voltage input to the inverter
+    source_type: coordinator_data
+    data_key: grid_voltage
+    device_class: voltage
+    state_class: measurement
+    unit_of_measurement: V
+    icon: mdi:transmission-tower
+
+  - entity_id: grid_frequency
+    name: Grid Frequency
+    description: AC grid frequency (typically 50Hz or 60Hz)
+    source_type: coordinator_data
+    data_key: grid_frequency
+    device_class: frequency
+    state_class: measurement
+    unit_of_measurement: Hz
+    icon: mdi:sine-wave
+
+  - entity_id: inverter_voltage
+    name: Inverter Voltage
+    description: AC output voltage from the inverter
+    source_type: coordinator_data
+    data_key: inverter_voltage
+    device_class: voltage
+    state_class: measurement
+    unit_of_measurement: V
+    icon: mdi:power-plug
+
+  - entity_id: inverter_frequency
+    name: Inverter Frequency
+    description: AC output frequency from the inverter
+    source_type: coordinator_data
+    data_key: inverter_frequency
+    device_class: frequency
+    state_class: measurement
+    unit_of_measurement: Hz
+    icon: mdi:sine-wave
+
+  - entity_id: update_duration
+    name: Update Duration
+    description: Time taken to complete each data update cycle from the inverter
+    source_type: coordinator_data
+    data_key: update_duration
+    device_class: duration
+    state_class: measurement
+    unit_of_measurement: s
+    entity_category: diagnostic
+    icon: mdi:timer
+
+  - entity_id: failed_reads_count
+    name: Failed Reads Count
+    description: Total number of failed communication attempts with the inverter
+    source_type: coordinator_data
+    data_key: failed_reads
+    state_class: total
+    entity_category: diagnostic
+    icon: mdi:alert-circle
+
+  # --------------------------------------------------------------------------
+  # PHASE 4 - SIMPLE SENSORS BATCH 2
+  # --------------------------------------------------------------------------
+
+  - entity_id: ac_charge_current
+    name: AC Charge Current
+    description: Current flowing from AC grid to charge the battery
+    source_type: coordinator_data
+    data_key: ac_charge_current
+    device_class: current
+    state_class: measurement
+    unit_of_measurement: A
+    icon: mdi:current-ac
+
+  - entity_id: pv_charge_current_actual
+    name: PV Charge Current
+    description: Current flowing from solar panels to charge the battery (actual measurement)
+    source_type: coordinator_data
+    data_key: pv_charge_current_actual
+    device_class: current
+    state_class: measurement
+    unit_of_measurement: A
+    icon: mdi:solar-power
+
+  - entity_id: load_ratio
+    name: Load Ratio
+    description: Current load as percentage of inverter rated capacity
+    source_type: coordinator_data
+    data_key: load_ratio
+    device_class: power_factor
+    state_class: measurement
+    unit_of_measurement: "%"
+    icon: mdi:percent
+
+  - entity_id: work_days_total
+    name: Work Days Total
+    description: Total number of days the inverter has been in operation
+    source_type: coordinator_data
+    data_key: work_days_total
+    state_class: total
+    unit_of_measurement: days
+    icon: mdi:calendar-clock
+
+  # --------------------------------------------------------------------------
+  # PHASE 5 - ENERGY STATISTICS SENSORS
+  # --------------------------------------------------------------------------
+
+  - entity_id: pv_energy_today
+    name: PV Energy Today
+    description: Total solar energy generated today, resets at midnight in your configured timezone
+    source_type: coordinator_data
+    data_key: pv_energy_today
+    device_class: energy
+    state_class: total
+    unit_of_measurement: kWh
+    last_reset: midnight_ha
+    icon: mdi:solar-power
+
+  - entity_id: load_energy_today
+    name: Load Energy Today
+    description: Total energy consumed by loads today, resets at midnight in your configured timezone
+    source_type: coordinator_data
+    data_key: load_energy_today
+    device_class: energy
+    state_class: total
+    unit_of_measurement: kWh
+    last_reset: midnight_ha
+    icon: mdi:home-lightning-bolt
+
+  - entity_id: pv_energy_total
+    name: PV Energy Total
+    description: Lifetime cumulative solar energy generated since installation
+    source_type: coordinator_data
+    data_key: pv_energy_total
+    device_class: energy
+    state_class: total_increasing
+    unit_of_measurement: kWh
+    icon: mdi:solar-power
+
+  - entity_id: load_energy_total
+    name: Load Energy Total
+    description: Lifetime cumulative energy consumed by loads since installation
+    source_type: coordinator_data
+    data_key: load_energy_total
+    device_class: energy
+    state_class: total_increasing
+    unit_of_measurement: kWh
+    icon: mdi:home-lightning-bolt
+
+  - entity_id: battery_charge_ah_today
+    name: Battery Charge AH Today
+    description: Total amp-hours charged into battery today, resets at midnight in your configured timezone
+    source_type: coordinator_data
+    data_key: battery_charge_ah_today
+    state_class: total
+    unit_of_measurement: AH
+    last_reset: midnight_ha
+    icon: mdi:battery-charging
+
+  - entity_id: battery_discharge_ah_today
+    name: Battery Discharge AH Today
+    description: Total amp-hours discharged from battery today, resets at midnight in your configured timezone
+    source_type: coordinator_data
+    data_key: battery_discharge_ah_today
+    state_class: total
+    unit_of_measurement: AH
+    last_reset: midnight_ha
+    icon: mdi:battery-arrow-down
+
+  - entity_id: grid_export_energy_today
+    name: Grid Export Energy Today
+    description: Total energy exported to grid today for grid-tied systems, resets at midnight
+    source_type: coordinator_data
+    data_key: grid_export_energy_today
+    device_class: energy
+    state_class: total
+    unit_of_measurement: kWh
+    last_reset: midnight_ha
+    icon: mdi:transmission-tower-export
+
+  - entity_id: ac_charge_energy_today
+    name: AC Charge Energy Today
+    description: Total AC charging energy today in amp-hours, resets at midnight
+    source_type: coordinator_data
+    data_key: ac_charge_energy_today
+    state_class: total
+    unit_of_measurement: AH
+    last_reset: midnight_ha
+    icon: mdi:current-ac
+
+  - entity_id: grid_export_energy_total
+    name: Grid Export Energy Total
+    description: Lifetime cumulative energy exported to grid for grid-tied systems
+    source_type: coordinator_data
+    data_key: grid_export_energy_total
+    device_class: energy
+    state_class: total_increasing
+    unit_of_measurement: kWh
+    icon: mdi:transmission-tower-export
+
+  - entity_id: battery_charge_ah_total
+    name: Battery Charge AH Total
+    description: Lifetime cumulative battery charging in amp-hours - useful for battery health tracking
+    source_type: coordinator_data
+    data_key: battery_charge_ah_total
+    state_class: total_increasing
+    unit_of_measurement: AH
+    entity_category: diagnostic
+    icon: mdi:battery-charging
+
+  - entity_id: battery_discharge_ah_total
+    name: Battery Discharge AH Total
+    description: Lifetime cumulative battery discharging in amp-hours - useful for battery health tracking
+    source_type: coordinator_data
+    data_key: battery_discharge_ah_total
+    state_class: total_increasing
+    unit_of_measurement: AH
+    entity_category: diagnostic
+    icon: mdi:battery-arrow-down
+
+  - entity_id: inverter_work_time_today
+    name: Inverter Work Time Today
+    description: Total time inverter was active today in minutes, resets at midnight
+    source_type: coordinator_data
+    data_key: inverter_work_time_today
+    device_class: duration
+    state_class: total
+    unit_of_measurement: min
+    last_reset: midnight_ha
+    entity_category: diagnostic
+    icon: mdi:timer-outline
+
+  - entity_id: bypass_work_time_today
+    name: Bypass Work Time Today
+    description: Total time bypass was active today in minutes, resets at midnight
+    source_type: coordinator_data
+    data_key: bypass_work_time_today
+    device_class: duration
+    state_class: total
+    unit_of_measurement: min
+    last_reset: midnight_ha
+    entity_category: diagnostic
+    icon: mdi:timer-outline
+
+  # --------------------------------------------------------------------------
+  # PHASE 6 - CALCULATED & MAPPED SENSORS
+  # --------------------------------------------------------------------------
+
+  - entity_id: battery_current
+    name: Battery Current
+    description: Current flowing to/from battery - positive when charging, negative when discharging
+    source_type: coordinator_data
+    data_key: battery_current
+    device_class: current
+    state_class: measurement
+    unit_of_measurement: A
+    icon: mdi:current-dc
+    attributes:
+      state: >
+        {% if value is none %}unknown{% elif value > 0 %}charging{% elif value < 0 %}discharging{% else %}idle{% endif %}
+
+  - entity_id: grid_import_power
+    name: Grid Import Power
+    description: Power being imported from the grid (positive values only)
+    source_type: calculated
+    formula: "{{ [0, grid_power] | max }}"
+    depends_on:
+      - grid_power
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:transmission-tower-import
+
+  - entity_id: grid_export_power
+    name: Grid Export Power
+    description: Power being exported to the grid (positive values only)
+    source_type: calculated
+    formula: "{{ [0, 0 - grid_power] | max }}"
+    depends_on:
+      - grid_power
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:transmission-tower-export
+
+  - entity_id: charge_state
+    name: Charge State
+    description: Current battery charging state and algorithm mode
+    source_type: register
+    value_mapping:
+      0: Charge Off
+      1: Quick Charge
+      2: Const Voltage
+      4: Float Charge
+      5: Reserved
+      6: Li Battery Activate
+      8: Full
+    unknown_value: Unknown
+    icon: mdi:battery-charging
+
+  - entity_id: last_update
+    name: Last Update
+    description: Timestamp of last successful communication with the inverter
+    source_type: coordinator_data
+    data_key: last_update_time
+    device_class: timestamp
+    entity_category: diagnostic
+    icon: mdi:clock-check
+
+  # --------------------------------------------------------------------------
+  # PHASE 7 - COMPLEX CALCULATED WITH DYNAMIC ICONS
+  # --------------------------------------------------------------------------
+
+  - entity_id: battery_power
+    name: Battery Power
+    description: Instantaneous battery power - positive when charging, negative when discharging
+    source_type: calculated
+    formula: "{{ (battery_voltage * battery_current) | round(1) }}"
+    depends_on:
+      - battery_voltage
+      - battery_current
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon:
+      dynamic: true
+      rules:
+        - condition: "is_none"
+          icon: mdi:battery
+        - condition: "value > 10"
+          icon: mdi:battery-arrow-down
+        - condition: "value < -10"
+          icon: mdi:battery-charging
+      default: mdi:battery
+
+  - entity_id: battery_charge_power
+    name: Battery Charge Power
+    description: Battery charging power shown as positive value only when charging
+    source_type: calculated
+    formula: "{{ [0, 0 - (battery_voltage * battery_current)] | max | round(1) }}"
+    depends_on:
+      - battery_voltage
+      - battery_current
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:battery-charging
+
+  - entity_id: battery_discharge_power
+    name: Battery Discharge Power
+    description: Battery discharging power shown as positive value only when discharging
+    source_type: calculated
+    formula: "{{ [0, battery_voltage * battery_current] | max | round(1) }}"
+    depends_on:
+      - battery_voltage
+      - battery_current
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:battery-arrow-down
+
+  - entity_id: ble_connection_quality
+    name: BLE Connection Quality
+    description: Bluetooth signal strength between inverter and Home Assistant
+    source_type: coordinator_data
+    data_key: ble_rssi
+    device_class: signal_strength
+    state_class: measurement
+    unit_of_measurement: dBm
+    entity_category: diagnostic
+    icon:
+      dynamic: true
+      rules:
+        - condition: "is_none"
+          icon: mdi:wifi-strength-off
+        - condition: "value >= -60"
+          icon: mdi:wifi-strength-4
+        - condition: "value >= -70"
+          icon: mdi:wifi-strength-3
+        - condition: "value >= -80"
+          icon: mdi:wifi-strength-2
+      default: mdi:wifi-strength-1
+
+  # --------------------------------------------------------------------------
+  # PHASE 8 - ADVANCED FORMULAS (FINAL PHASE)
+  # --------------------------------------------------------------------------
+
+  - entity_id: self_sufficiency
+    name: Self Sufficiency
+    description: Percentage of load power met by solar generation - 100% means fully self-sufficient
+    source_type: calculated
+    formula: |
+      {% if load_power == 0 %}
+        {{ 0.0 if pv_power == 0 else 100.0 }}
+      {% else %}
+        {{ ([((pv_power / load_power) * 100), 100.0] | min) | round(1) }}
+      {% endif %}
+    depends_on:
+      - pv_power
+      - load_power
+    state_class: measurement
+    unit_of_measurement: "%"
+    icon: mdi:solar-panel
+
+  - entity_id: grid_dependency
+    name: Grid Dependency
+    description: Percentage of load power drawn from grid - lower is better for energy independence
+    source_type: calculated
+    formula: |
+      {% if grid_power <= 0 or load_power == 0 %}
+        {{ 0.0 }}
+      {% else %}
+        {{ ([((grid_power / load_power) * 100), 100.0] | min) | round(1) }}
+      {% endif %}
+    depends_on:
+      - grid_power
+      - load_power
+    state_class: measurement
+    unit_of_measurement: "%"
+    icon: mdi:transmission-tower
+
+  - entity_id: system_efficiency
+    name: System Efficiency
+    description: How efficiently solar power is converted to usable energy (load + battery charging)
+    source_type: calculated
+    formula: |
+      {% if pv_power is none or pv_power == 0 %}
+        None
+      {% else %}
+        {% set battery_charge = battery_voltage * ([battery_current, 0] | max) %}
+        {% set usable_power = load_power + battery_charge %}
+        {% set efficiency = (usable_power / pv_power) * 100 %}
+        {{ ([[efficiency, 100.0] | min, 0.0] | max) | round(1) }}
+      {% endif %}
+    depends_on:
+      - pv_power
+      - load_power
+      - battery_voltage
+      - battery_current
+    state_class: measurement
+    unit_of_measurement: "%"
+    icon: mdi:gauge
+
+  - entity_id: success_rate
+    name: Success Rate
+    description: Percentage of successful communication attempts with inverter via Bluetooth
+    source_type: calculated
+    formula: |
+      {% if total_updates == 0 %}
+        {{ None }}
+      {% else %}
+        {{ (((total_updates - failed_reads) / total_updates) * 100) | round(1) }}
+      {% endif %}
+    depends_on:
+      - total_updates
+      - failed_reads
+    state_class: measurement
+    unit_of_measurement: "%"
+    entity_category: diagnostic
+    icon: mdi:check-network
+
+  # --------------------------------------------------------------------------
+  # PRIORITY 1 SENSORS (from UNSUPPORTED_FEATURES_ANALYSIS.md)
+  # --------------------------------------------------------------------------
+
+  - entity_id: system_datetime
+    name: System DateTime
+    description: Current date and time from the inverter's real-time clock - critical for timed charge/discharge operations
+    source_type: calculated
+    formula: >-
+      {% set year_month = system_datetime_year_month -%}
+      {% set day_hour = system_datetime_day_hour -%}
+      {% set minute_second = system_datetime_minute_second -%}
+      {% if year_month is none or day_hour is none or minute_second is none or year_month == 0 -%}
+        {{ None }}
+      {%- else -%}
+        {% set year = (year_month // 256) + 2000 -%}
+        {% set month = year_month % 256 -%}
+        {% set day = day_hour // 256 -%}
+        {% set hour = day_hour % 256 -%}
+        {% set minute = minute_second // 256 -%}
+        {% set second = minute_second % 256 -%}
+        {{ '%04d-%02d-%02dT%02d:%02d:%02d' | format(year, month, day, hour, minute, second) }}
+      {%- endif %}
+    depends_on:
+      - system_datetime_year_month
+      - system_datetime_day_hour
+      - system_datetime_minute_second
+    entity_category: diagnostic
+    icon: mdi:clock-outline
+
+  - entity_id: grid_on_countdown
+    name: Grid-on Countdown
+    description: Countdown timer showing seconds until inverter connects to grid - helps monitor grid synchronization process
+    source_type: coordinator_data
+    data_key: grid_on_countdown
+    device_class: duration
+    state_class: measurement
+    unit_of_measurement: s
+    entity_category: diagnostic
+    icon: mdi:timer-sand
+
+  # --------------------------------------------------------------------------
+  # PRIORITY 2 SENSORS - ALWAYS ENABLED (DIAGNOSTIC)
+  # --------------------------------------------------------------------------
+
+  - entity_id: total_bus_voltage
+    name: Total Bus Voltage
+    description: Total DC bus voltage for system diagnostics and monitoring
+    source_type: coordinator_data
+    data_key: total_bus_voltage
+    device_class: voltage
+    state_class: measurement
+    unit_of_measurement: V
+    entity_category: diagnostic
+    icon: mdi:lightning-bolt-circle
+
+  - entity_id: transformer_temperature
+    name: Transformer Temperature
+    description: Transformer heatsink temperature for thermal monitoring and troubleshooting
+    source_type: coordinator_data
+    data_key: transformer_temperature
+    device_class: temperature
+    state_class: measurement
+    unit_of_measurement: °C
+    entity_category: diagnostic
+    icon: mdi:thermometer
+
+  - entity_id: ambient_temperature
+    name: Ambient Temperature
+    description: Enclosure ambient temperature for environmental monitoring
+    source_type: coordinator_data
+    data_key: ambient_temperature
+    device_class: temperature
+    state_class: measurement
+    unit_of_measurement: °C
+    entity_category: diagnostic
+    icon: mdi:thermometer-lines
+
+  - entity_id: charge_power_total
+    name: Total Charge Power
+    description: Combined charging power from both PV and AC sources
+    source_type: coordinator_data
+    data_key: charge_power_total
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:battery-charging-high
+
+  - entity_id: load_current
+    name: Load Current
+    description: Load side phase-A current draw from the inverter
+    source_type: coordinator_data
+    data_key: load_current
+    device_class: current
+    state_class: measurement
+    unit_of_measurement: A
+    icon: mdi:current-ac
+
+  # --------------------------------------------------------------------------
+  # PRIORITY 2 SENSORS - DUAL-PV SYSTEMS (DISABLED BY DEFAULT)
+  # --------------------------------------------------------------------------
+
+  - entity_id: pv2_voltage
+    name: PV2 Voltage
+    description: Second PV panel voltage for dual-PV systems
+    source_type: coordinator_data
+    data_key: pv2_voltage
+    device_class: voltage
+    state_class: measurement
+    unit_of_measurement: V
+    icon: mdi:solar-power-variant
+
+  - entity_id: pv2_current
+    name: PV2 Current
+    description: Second PV panel current for dual-PV systems
+    source_type: coordinator_data
+    data_key: pv2_current
+    device_class: current
+    state_class: measurement
+    unit_of_measurement: A
+    icon: mdi:solar-power-variant
+
+  - entity_id: pv2_power
+    name: PV2 Power
+    description: Second PV panel power generation for dual-PV systems
+    source_type: coordinator_data
+    data_key: pv2_power
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:solar-power-variant
+
+  # --------------------------------------------------------------------------
+  # PRIORITY 2 SENSORS - SPLIT-PHASE SYSTEMS (DISABLED BY DEFAULT)
+  # --------------------------------------------------------------------------
+
+  - entity_id: positive_bus_voltage
+    name: Positive Bus Voltage
+    description: Positive DC bus voltage for split-phase systems (US L1/L2)
+    source_type: coordinator_data
+    data_key: positive_bus_voltage
+    device_class: voltage
+    state_class: measurement
+    unit_of_measurement: V
+    entity_category: diagnostic
+    icon: mdi:lightning-bolt
+
+  - entity_id: negative_bus_voltage
+    name: Negative Bus Voltage
+    description: Negative DC bus voltage for split-phase systems (US L1/L2)
+    source_type: coordinator_data
+    data_key: negative_bus_voltage
+    device_class: voltage
+    state_class: measurement
+    unit_of_measurement: V
+    entity_category: diagnostic
+    icon: mdi:lightning-bolt
+
+  # --------------------------------------------------------------------------
+  # PRIORITY 2 SENSORS - 3-PHASE SYSTEMS (DISABLED BY DEFAULT)
+  # --------------------------------------------------------------------------
+
+  - entity_id: grid_voltage_b
+    name: Grid Voltage Phase B
+    description: AC grid voltage phase B for 3-phase systems
+    source_type: coordinator_data
+    data_key: grid_voltage_b
+    device_class: voltage
+    state_class: measurement
+    unit_of_measurement: V
+    icon: mdi:transmission-tower
+
+  - entity_id: grid_voltage_c
+    name: Grid Voltage Phase C
+    description: AC grid voltage phase C for 3-phase systems
+    source_type: coordinator_data
+    data_key: grid_voltage_c
+    device_class: voltage
+    state_class: measurement
+    unit_of_measurement: V
+    icon: mdi:transmission-tower
+
+  - entity_id: grid_current_b
+    name: Grid Current Phase B
+    description: AC grid current phase B for 3-phase systems
+    source_type: coordinator_data
+    data_key: grid_current_b
+    device_class: current
+    state_class: measurement
+    unit_of_measurement: A
+    icon: mdi:transmission-tower
+
+  - entity_id: grid_current_c
+    name: Grid Current Phase C
+    description: AC grid current phase C for 3-phase systems
+    source_type: coordinator_data
+    data_key: grid_current_c
+    device_class: current
+    state_class: measurement
+    unit_of_measurement: A
+    icon: mdi:transmission-tower
+
+  - entity_id: grid_power_b
+    name: Grid Power Phase B
+    description: Grid active power phase B for 3-phase systems - positive when exporting, negative when importing
+    source_type: coordinator_data
+    data_key: grid_power_b
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:transmission-tower
+
+  - entity_id: grid_power_c
+    name: Grid Power Phase C
+    description: Grid active power phase C for 3-phase systems - positive when exporting, negative when importing
+    source_type: coordinator_data
+    data_key: grid_power_c
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:transmission-tower
+
+  - entity_id: inverter_voltage_b
+    name: Inverter Voltage Phase B
+    description: Inverter output voltage phase B for 3-phase systems
+    source_type: coordinator_data
+    data_key: inverter_voltage_b
+    device_class: voltage
+    state_class: measurement
+    unit_of_measurement: V
+    icon: mdi:power-plug
+
+  - entity_id: inverter_voltage_c
+    name: Inverter Voltage Phase C
+    description: Inverter output voltage phase C for 3-phase systems
+    source_type: coordinator_data
+    data_key: inverter_voltage_c
+    device_class: voltage
+    state_class: measurement
+    unit_of_measurement: V
+    icon: mdi:power-plug
+
+  - entity_id: inverter_current_b
+    name: Inverter Current Phase B
+    description: Inverter output current phase B for 3-phase systems
+    source_type: coordinator_data
+    data_key: inverter_current_b
+    device_class: current
+    state_class: measurement
+    unit_of_measurement: A
+    icon: mdi:power-plug
+
+  - entity_id: inverter_current_c
+    name: Inverter Current Phase C
+    description: Inverter output current phase C for 3-phase systems
+    source_type: coordinator_data
+    data_key: inverter_current_c
+    device_class: current
+    state_class: measurement
+    unit_of_measurement: A
+    icon: mdi:power-plug
+
+  - entity_id: load_current_b
+    name: Load Current Phase B
+    description: Load side current phase B for 3-phase systems
+    source_type: coordinator_data
+    data_key: load_current_b
+    device_class: current
+    state_class: measurement
+    unit_of_measurement: A
+    icon: mdi:home-lightning-bolt
+
+  - entity_id: load_current_c
+    name: Load Current Phase C
+    description: Load side current phase C for 3-phase systems
+    source_type: coordinator_data
+    data_key: load_current_c
+    device_class: current
+    state_class: measurement
+    unit_of_measurement: A
+    icon: mdi:home-lightning-bolt
+
+  - entity_id: load_power_b
+    name: Load Power Phase B
+    description: Load active power phase B for 3-phase systems
+    source_type: coordinator_data
+    data_key: load_power_b
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:home-lightning-bolt
+
+  - entity_id: load_power_c
+    name: Load Power Phase C
+    description: Load active power phase C for 3-phase systems
+    source_type: coordinator_data
+    data_key: load_power_c
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:home-lightning-bolt
+
+  - entity_id: load_power_b_home
+    name: Home Load Power Phase B
+    description: Home load active power consumption phase B measured by CT sensor for 3-phase systems
+    source_type: coordinator_data
+    data_key: load_power_b_home
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:home-lightning-bolt-outline
+
+  - entity_id: load_power_c_home
+    name: Home Load Power Phase C
+    description: Home load active power consumption phase C measured by CT sensor for 3-phase systems
+    source_type: coordinator_data
+    data_key: load_power_c_home
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon: mdi:home-lightning-bolt-outline
+
+  # --------------------------------------------------------------------------
+  # ADVANCED CALCULATED SENSORS - BATTERY HEALTH & LIFECYCLE
+  # --------------------------------------------------------------------------
+
+  - entity_id: battery_cycle_count
+    name: Battery Cycle Count
+    description: Estimated number of complete battery charge/discharge cycles - critical for warranty tracking and predicting battery replacement
+    source_type: calculated
+    formula: >-
+      {% set battery_capacity_ah = 200 -%}
+      {% if battery_charge_ah_total is defined and battery_discharge_ah_total is defined -%}
+        {% if battery_charge_ah_total > 0 -%}
+          {{ (battery_discharge_ah_total / battery_capacity_ah) | round(1) }}
+        {%- else -%}
+          {{ 0 }}
+        {%- endif %}
+      {%- else -%}
+        {{ None }}
+      {%- endif %}
+    depends_on:
+      - battery_charge_ah_total
+      - battery_discharge_ah_total
+    state_class: total_increasing
+    unit_of_measurement: cycles
+    entity_category: diagnostic
+    icon: mdi:battery-sync
+
+  - entity_id: battery_charge_rate
+    name: Battery Charge Rate
+    description: Battery charging rate as C-rate (1C = full capacity in 1 hour) - monitors charging stress on battery
+    source_type: calculated
+    formula: >-
+      {% set battery_capacity_ah = 200 -%}
+      {% set current = battery_current | float -%}
+      {% if battery_capacity_ah > 0 and current < 0 -%}
+        {{ ((-current / battery_capacity_ah) * 100) | round(2) }}
+      {%- else -%}
+        {{ 0 }}
+      {%- endif %}
+    depends_on:
+      - battery_current
+    state_class: measurement
+    unit_of_measurement: C
+    entity_category: diagnostic
+    icon: mdi:speedometer
+    attributes:
+      status: >
+        {% set rate = value | float(0) %}
+        {% if rate < 0.05 %}idle
+        {% elif rate < 0.2 %}slow
+        {% elif rate < 0.5 %}normal
+        {% elif rate < 1.0 %}fast
+        {% else %}very_fast{% endif %}
+
+  - entity_id: battery_discharge_rate
+    name: Battery Discharge Rate
+    description: Battery discharge rate as C-rate - monitors discharge stress and helps predict battery runtime
+    source_type: calculated
+    formula: >-
+      {% set battery_capacity_ah = 200 -%}
+      {% set current = battery_current | float -%}
+      {% if battery_capacity_ah > 0 and current > 0 -%}
+        {{ ((current / battery_capacity_ah) * 100) | round(2) }}
+      {%- else -%}
+        {{ 0 }}
+      {%- endif %}
+    depends_on:
+      - battery_current
+    state_class: measurement
+    unit_of_measurement: C
+    entity_category: diagnostic
+    icon: mdi:speedometer
+
+  - entity_id: battery_time_to_full
+    name: Battery Time to Full
+    description: Estimated time until battery reaches 100% SOC based on current charge rate - helps plan energy usage
+    source_type: calculated
+    formula: >-
+      {% set battery_capacity_ah = 200 -%}
+      {% set soc = battery_soc | float -%}
+      {% set current = battery_current | float -%}
+      {% if current < -0.5 and soc < 100 -%}
+        {% set remaining_ah = battery_capacity_ah * (100 - soc) / 100 -%}
+        {% set hours = remaining_ah / (-current) -%}
+        {{ (hours * 60) | round(0) }}
+      {%- else -%}
+        {{ None }}
+      {%- endif %}
+    depends_on:
+      - battery_soc
+      - battery_current
+    device_class: duration
+    state_class: measurement
+    unit_of_measurement: min
+    icon: mdi:battery-charging-100
+
+  - entity_id: battery_time_to_empty
+    name: Battery Time to Empty
+    description: Estimated time until battery reaches 0% SOC based on current discharge rate - critical for backup planning
+    source_type: calculated
+    formula: >-
+      {% set battery_capacity_ah = 200 -%}
+      {% set soc = battery_soc | float -%}
+      {% set current = battery_current | float -%}
+      {% if current > 0.5 and soc > 0 -%}
+        {% set remaining_ah = battery_capacity_ah * soc / 100 -%}
+        {% set hours = remaining_ah / current -%}
+        {{ (hours * 60) | round(0) }}
+      {%- else -%}
+        {{ None }}
+      {%- endif %}
+    depends_on:
+      - battery_soc
+      - battery_current
+    device_class: duration
+    state_class: measurement
+    unit_of_measurement: min
+    icon: mdi:battery-alert
+
+  # --------------------------------------------------------------------------
+  # ADVANCED CALCULATED SENSORS - ENERGY FLOW ANALYSIS
+  # --------------------------------------------------------------------------
+
+  - entity_id: energy_flow_balance
+    name: Energy Flow Balance
+    description: Real-time power balance - positive means surplus energy (exporting), negative means deficit (importing)
+    source_type: calculated
+    formula: >-
+      {% set pv = pv_power | float(0) -%}
+      {% set load = load_power | float(0) -%}
+      {% set battery = battery_power | float(0) -%}
+      {{ (pv - load + battery) | round(0) }}
+    depends_on:
+      - pv_power
+      - load_power
+      - battery_power
+    device_class: power
+    state_class: measurement
+    unit_of_measurement: W
+    icon:
+      dynamic: true
+      rules:
+        - condition: "is_none"
+          icon: mdi:scale-balance
+        - condition: "value > 100"
+          icon: mdi:arrow-up-bold
+        - condition: "value < -100"
+          icon: mdi:arrow-down-bold
+      default: mdi:scale-balance
+
+  - entity_id: pv_utilization_rate
+    name: PV Utilization Rate
+    description: Percentage of solar power being utilized vs generated - 100% means all solar is used, lower means curtailment
+    source_type: calculated
+    formula: >-
+      {% set pv = pv_power | float(0) -%}
+      {% set load = load_power | float(0) -%}
+      {% set battery_charge = battery_charge_power | float(0) -%}
+      {% set grid_export = grid_export_power | float(0) -%}
+      {% if pv > 10 -%}
+        {% set utilized = load + battery_charge + grid_export -%}
+        {{ (([utilized / pv * 100, 100.0] | min)) | round(1) }}
+      {%- else -%}
+        {{ 0 }}
+      {%- endif %}
+    depends_on:
+      - pv_power
+      - load_power
+      - battery_charge_power
+      - grid_export_power
+    state_class: measurement
+    unit_of_measurement: "%"
+    icon: mdi:solar-power-variant
+
+  - entity_id: battery_contribution_rate
+    name: Battery Contribution Rate
+    description: Percentage of load power supplied by battery discharge - shows battery's role in powering loads
+    source_type: calculated
+    formula: >-
+      {% set load = load_power | float(0) -%}
+      {% set battery_discharge = battery_discharge_power | float(0) -%}
+      {% if load > 10 -%}
+        {{ ((battery_discharge / load * 100)) | round(1) }}
+      {%- else -%}
+        {{ 0 }}
+      {%- endif %}
+    depends_on:
+      - load_power
+      - battery_discharge_power
+    state_class: measurement
+    unit_of_measurement: "%"
+    icon: mdi:battery-arrow-up
+
+  # --------------------------------------------------------------------------
+  # ADVANCED CALCULATED SENSORS - COST & SAVINGS
+  # --------------------------------------------------------------------------
+
+  - entity_id: daily_solar_value
+    name: Daily Solar Value
+    description: Estimated monetary value of solar energy generated today at grid electricity rates
+    source_type: calculated
+    formula: >-
+      {% set pv_energy = pv_energy_today | float(0) -%}
+      {% set electricity_rate = 0.15 -%}
+      {{ (pv_energy * electricity_rate) | round(2) }}
+    depends_on:
+      - pv_energy_today
+    state_class: total
+    unit_of_measurement: $
+    last_reset: midnight_ha
+    icon: mdi:cash-plus
+    attributes:
+      rate: "{{ 0.15 }}"
+
+  # --------------------------------------------------------------------------
+  # ADVANCED CALCULATED SENSORS - SYSTEM HEALTH
+  # --------------------------------------------------------------------------
+
+  - entity_id: thermal_stress_indicator
+    name: Thermal Stress Indicator
+    description: Composite thermal health score (0-100) - lower is better, monitors overheating risk
+    source_type: calculated
+    formula: >-
+      {% set inv_temp = inverter_temperature | float(0) -%}
+      {% set bat_temp = battery_temperature | float(0) -%}
+      {% set trans_temp = transformer_temperature | float(0) -%}
+      {% set ambient = ambient_temperature | float(25) -%}
+      {% set inv_delta = [inv_temp - ambient, 0] | max -%}
+      {% set bat_delta = [bat_temp - ambient, 0] | max -%}
+      {% set trans_delta = [trans_temp - ambient, 0] | max -%}
+      {% set stress = (inv_delta * 0.4 + bat_delta * 0.4 + trans_delta * 0.2) -%}
+      {{ ([stress, 100] | min) | round(0) }}
+    depends_on:
+      - inverter_temperature
+      - battery_temperature
+      - transformer_temperature
+      - ambient_temperature
+    state_class: measurement
+    unit_of_measurement: score
+    entity_category: diagnostic
+    icon:
+      dynamic: true
+      rules:
+        - condition: "value < 20"
+          icon: mdi:thermometer-low
+        - condition: "value < 40"
+          icon: mdi:thermometer
+        - condition: "value < 60"
+          icon: mdi:thermometer-high
+      default: mdi:thermometer-alert
+
+  - entity_id: system_health_score
+    name: System Health Score
+    description: Overall system health score (0-100) combining efficiency, thermal status, and communication - 100 is perfect
+    source_type: calculated
+    formula: >-
+      {% set efficiency = system_efficiency | float(80) -%}
+      {% set thermal = thermal_stress_indicator | float(0) -%}
+      {% set success = success_rate | float(100) -%}
+      {% set health = (efficiency * 0.4 + (100 - thermal) * 0.3 + success * 0.3) -%}
+      {{ ([health, 100] | min) | round(0) }}
+    depends_on:
+      - system_efficiency
+      - thermal_stress_indicator
+      - success_rate
+    state_class: measurement
+    unit_of_measurement: score
+    icon:
+      dynamic: true
+      rules:
+        - condition: "value >= 90"
+          icon: mdi:check-decagram
+        - condition: "value >= 70"
+          icon: mdi:check-circle
+        - condition: "value >= 50"
+          icon: mdi:alert-circle
+      default: mdi:alert-octagon
+
+  # --------------------------------------------------------------------------
+  # ADVANCED CALCULATED SENSORS - EFFICIENCY METRICS
+  # --------------------------------------------------------------------------
+
+  - entity_id: round_trip_efficiency
+    name: Round Trip Efficiency
+    description: Daily battery round-trip efficiency (discharge/charge ratio) - measures energy loss in battery cycling
+    source_type: calculated
+    formula: >-
+      {% set charge_ah = battery_charge_ah_today | float(0) -%}
+      {% set discharge_ah = battery_discharge_ah_today | float(0) -%}
+      {% if charge_ah > 1 -%}
+        {{ ((discharge_ah / charge_ah * 100)) | round(1) }}
+      {%- else -%}
+        {{ None }}
+      {%- endif %}
+    depends_on:
+      - battery_charge_ah_today
+      - battery_discharge_ah_today
+    state_class: measurement
+    unit_of_measurement: "%"
+    icon: mdi:battery-sync-outline
+
+  - entity_id: pv_to_load_direct_ratio
+    name: PV to Load Direct Ratio
+    description: Percentage of load power supplied directly from solar panels - higher means more efficient energy use
+    source_type: calculated
+    formula: >-
+      {% set pv = pv_power | float(0) -%}
+      {% set load = load_power | float(0) -%}
+      {% set battery_discharge = battery_discharge_power | float(0) -%}
+      {% set grid_import = grid_import_power | float(0) -%}
+      {% if load > 10 -%}
+        {% set pv_direct = [pv - battery_charge_power | float(0), 0] | max -%}
+        {% set pv_to_load = [pv_direct, load] | min -%}
+        {{ ((pv_to_load / load * 100)) | round(1) }}
+      {%- else -%}
+        {{ 0 }}
+      {%- endif %}
+    depends_on:
+      - pv_power
+      - load_power
+      - battery_charge_power
+      - battery_discharge_power
+    state_class: measurement
+    unit_of_measurement: "%"
+    icon: mdi:solar-panel-large
+
+  - entity_id: daily_battery_throughput
+    name: Daily Battery Throughput
+    description: Total energy cycled through battery today - helps track battery wear and usage intensity
+    source_type: calculated
+    formula: >-
+      {% set charge_ah = battery_charge_ah_today | float(0) -%}
+      {% set discharge_ah = battery_discharge_ah_today | float(0) -%}
+      {% set voltage = battery_voltage | float(48) -%}
+      {{ ((charge_ah + discharge_ah) * voltage / 1000) | round(2) }}
+    depends_on:
+      - battery_charge_ah_today
+      - battery_discharge_ah_today
+      - battery_voltage
+    state_class: total
+    unit_of_measurement: kWh
+    last_reset: midnight_ha
+    icon: mdi:battery-sync
+
+# ============================================================================
+# SWITCH ENTITIES
+# ============================================================================
+switches:
+  # Command switch with machine state verification
+  - entity_id: ac_power
+    name: AC Power
+    description: Control AC power output from the inverter - turn on to enable inverter operation, turn off for standby mode
+    device_class: outlet
+    register: power_control
+    on_value: 1
+    off_value: 0
+    # Use machine_state from coordinator to determine on/off
+    state_key: machine_state
+    state_mapping:
+      "on": [4, 5] # AC power operation, Inverter operation
+      "off": [1, 9] # Standby, Manual shutdown
+    icon: mdi:power-plug
+
+# ============================================================================
+# SELECT ENTITIES
+# ============================================================================
+selects:
+  # Select with option mapping
+  - entity_id: energy_priority
+    name: Energy Priority
+    description: Choose which power source takes priority when multiple sources are available - Solar First maximizes renewable energy use, Utility First keeps grid connection, Battery First extends battery runtime
+    register: energy_priority
+    type: read_write
+    options:
+      0: Solar First
+      1: Utility First
+      2: Battery First
+    icon: mdi:priority-high
+
+  - entity_id: battery_type
+    name: Battery Type
+    register: battery_type
+    options:
+      0: User Defined
+      1: Sealed Lead Acid
+      2: Flooded Lead Acid
+      3: GEL
+      4: LiFePO4 14S
+      5: LiFePO4 15S
+      6: LiFePO4 16S
+      7: LiFePO4 7S
+      8: LiFePO4 8S
+      9: LiFePO4 9S
+      10: Ternary Lithium 7S
+      11: Ternary Lithium 8S
+      12: Ternary Lithium 13S
+      13: Ternary Lithium 14S
+    icon: mdi:battery-unknown
+    entity_category: config
+
+  - entity_id: battery_voltage
+    name: System Voltage
+    register: battery_voltage
+    options:
+      12: 12V
+      24: 24V
+      36: 36V
+      48: 48V
+    icon: mdi:lightning-bolt
+    entity_category: config
+
+  - entity_id: working_mode
+    name: Inverter Working Mode
+    register: working_mode
+    options:
+      0: Off-Grid Mode
+      1: Grid-Connected Mode
+      2: ACout Anti-Reverse Flow
+      3: ACin Anti-Reverse Flow
+    icon: mdi:power-settings
+    entity_category: config
+
+  - entity_id: charge_source_priority
+    name: Charge Source Priority
+    register: charge_source_priority
+    options:
+      0: PV Priority
+      1: AC Priority
+      2: Hybrid (PV Priority)
+      3: PV Only
+    icon: mdi:battery-charging
+    entity_category: config
+
+  - entity_id: ac_voltage_range
+    name: AC Input Voltage Range
+    register: ac_voltage_range
+    options:
+      0: Wide Band (APL)
+      1: Narrow Band (UPS)
+    icon: mdi:sine-wave
+    entity_category: config
+
+  - entity_id: parallel_mode
+    name: Parallel Mode
+    register: parallel_mode
+    options:
+      0: Single Unit
+      1: Single Phase Parallel
+      2: Two Phase 180° L1
+      3: Two Phase 180° L2
+      4: Three Phase L1
+      5: Three Phase L2
+      6: Three Phase L3
+      7: Split Phase
+    icon: mdi:plus-network
+    entity_category: config
+
+  - entity_id: bms_communication
+    name: BMS Communication
+    register: bms_communication
+    options:
+      0: Disabled
+      1: RS485 BMS
+      2: CAN BMS
+    icon: mdi:serial-port
+    entity_category: config
+
+  - entity_id: pv_power_balance
+    name: PV Power Priority
+    register: pv_power_balance
+    options:
+      0: Charging Priority
+      1: Load Priority
+    icon: mdi:scale-balance
+    entity_category: config
+
+# ============================================================================
+# NUMBER ENTITIES
+# ============================================================================
+numbers:
+  # --------------------------------------------------------------------------
+  # BATTERY VOLTAGE SETTINGS
+  # --------------------------------------------------------------------------
+
+  - entity_id: battery_overvoltage
+    mode: "box"
+    name: Battery Overvoltage Protection
+    register: battery_overvoltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:battery-alert
+    entity_category: config
+
+  - entity_id: battery_charge_limit_voltage
+    mode: "box"
+    name: Charge Limit Voltage
+    register: battery_charge_limit_voltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:battery-charging-high
+    entity_category: config
+
+  - entity_id: equalizing_charge_voltage
+    mode: "box"
+    name: Equalizing Charge Voltage
+    register: equalizing_charge_voltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:battery-charging-100
+    entity_category: config
+
+  - entity_id: bulk_charge_voltage
+    mode: "box"
+    name: Bulk Charge Voltage
+    register: bulk_charge_voltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:battery-charging-80
+    entity_category: config
+
+  - entity_id: float_charge_voltage
+    mode: "box"
+    name: Float Charge Voltage
+    register: float_charge_voltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:battery-charging-60
+    entity_category: config
+
+  - entity_id: boost_charge_return_voltage
+    mode: "box"
+    name: Boost Charge Return Voltage
+    register: boost_charge_return_voltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:battery-arrow-up
+    entity_category: config
+
+  - entity_id: over_discharge_return_voltage
+    mode: "box"
+    name: Over-Discharge Recovery Voltage
+    register: over_discharge_return_voltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:battery-arrow-down
+    entity_category: config
+
+  - entity_id: battery_under_voltage
+    mode: "box"
+    name: Battery Under-Voltage Warning
+    register: battery_under_voltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:battery-low
+    entity_category: config
+
+  - entity_id: battery_low_voltage
+    mode: "box"
+    name: Battery Low Voltage Cutoff
+    register: battery_low_voltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:battery-outline
+    entity_category: config
+
+  - entity_id: battery_shutdown_voltage
+    mode: "box"
+    name: Battery Shutdown Voltage
+    register: battery_shutdown_voltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:battery-off
+    entity_category: config
+
+  - entity_id: grid_charge_start_voltage
+    mode: "box"
+    name: Grid Charge Start Voltage
+    register: grid_charge_start_voltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:transmission-tower-import
+    entity_category: config
+
+  - entity_id: inverter_switch_voltage
+    mode: "box"
+    name: Inverter Switch Voltage
+    register: inverter_switch_voltage
+    min: 9.0
+    max: 15.5
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:power-plug-battery
+    entity_category: config
+
+  # --------------------------------------------------------------------------
+  # CHARGE CURRENT SETTINGS
+  # --------------------------------------------------------------------------
+
+  - entity_id: pv_charge_current
+    mode: "box"
+    name: PV Charge Current Limit
+    register: pv_charge_current
+    min: 0
+    max: 150
+    step: 0.1
+    unit_of_measurement: A
+    device_class: current
+    icon: mdi:solar-power
+    entity_category: config
+
+  - entity_id: max_ac_charge_current
+    mode: "box"
+    name: Maximum AC Charge Current
+    register: max_ac_charge_current
+    min: 0
+    max: 200
+    step: 0.1
+    unit_of_measurement: A
+    device_class: current
+    icon: mdi:current-ac
+    entity_category: config
+
+  - entity_id: max_charge_current
+    mode: "box"
+    name: Maximum Charge Current
+    register: max_charge_current
+    min: 0
+    max: 200
+    step: 0.1
+    unit_of_measurement: A
+    device_class: current
+    icon: mdi:battery-charging
+    entity_category: config
+
+  - entity_id: stop_charge_current
+    mode: "box"
+    name: Stop Charge Current (Lithium)
+    register: stop_charge_current
+    min: 0
+    max: 10
+    step: 0.1
+    unit_of_measurement: A
+    device_class: current
+    icon: mdi:battery-check
+    entity_category: config
+
+  - entity_id: lithium_activation_current
+    mode: "box"
+    name: Lithium Activation Current
+    register: lithium_activation_current
+    min: 0
+    max: 20
+    step: 0.1
+    unit_of_measurement: A
+    device_class: current
+    icon: mdi:battery-heart-variant
+    entity_category: config
+
+  - entity_id: generator_charge_current
+    mode: "box"
+    name: Generator Charge Current
+    register: generator_charge_current
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: A
+    device_class: current
+    icon: mdi:generator-portable
+    entity_category: config
+
+  - entity_id: max_grid_current
+    mode: "box"
+    name: Max Grid Input Current
+    register: max_grid_current
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: A
+    device_class: current
+    icon: mdi:transmission-tower
+    entity_category: config
+
+  # --------------------------------------------------------------------------
+  # BATTERY CAPACITY AND SOC SETTINGS
+  # --------------------------------------------------------------------------
+
+  - entity_id: battery_capacity
+    mode: "box"
+    name: Battery Rated Capacity
+    register: battery_capacity
+    min: 0
+    max: 400
+    step: 1
+    unit_of_measurement: Ah
+    icon: mdi:battery-high
+    entity_category: config
+
+  - entity_id: discharge_cutoff_soc
+    mode: "box"
+    name: Discharge Cutoff SOC
+    register: discharge_cutoff_soc
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:battery-20
+    entity_category: config
+
+  - entity_id: stop_charge_soc
+    mode: "box"
+    name: Stop Charge SOC
+    register: stop_charge_soc
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:battery-100
+    entity_category: config
+
+  - entity_id: soc_low_alarm
+    mode: "box"
+    name: Low SOC Alarm
+    register: soc_low_alarm
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:battery-alert-variant
+    entity_category: config
+
+  - entity_id: soc_switch_to_grid
+    mode: "box"
+    name: SOC Switch to Grid
+    register: soc_switch_to_grid
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:transmission-tower-import
+    entity_category: config
+
+  - entity_id: soc_switch_to_battery
+    mode: "box"
+    name: SOC Switch to Battery
+    register: soc_switch_to_battery
+    min: 1
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:battery-sync
+    entity_category: config
+
+  # --------------------------------------------------------------------------
+  # TEMPERATURE SETTINGS
+  # --------------------------------------------------------------------------
+
+  - entity_id: charge_max_temperature
+    mode: "box"
+    name: Charge Max Temperature
+    register: charge_max_temperature
+    min: -40
+    max: 100
+    step: 1
+    unit_of_measurement: °C
+    device_class: temperature
+    icon: mdi:thermometer-alert
+    entity_category: config
+
+  - entity_id: charge_min_temperature
+    mode: "box"
+    name: Charge Min Temperature
+    register: charge_min_temperature
+    min: -40
+    max: 100
+    step: 1
+    unit_of_measurement: °C
+    device_class: temperature
+    icon: mdi:thermometer-low
+    entity_category: config
+
+  - entity_id: discharge_max_temperature
+    mode: "box"
+    name: Discharge Max Temperature
+    register: discharge_max_temperature
+    min: -40
+    max: 100
+    step: 1
+    unit_of_measurement: °C
+    device_class: temperature
+    icon: mdi:thermometer-high
+    entity_category: config
+
+  - entity_id: discharge_min_temperature
+    mode: "box"
+    name: Discharge Min Temperature
+    register: discharge_min_temperature
+    min: -40
+    max: 100
+    step: 1
+    unit_of_measurement: °C
+    device_class: temperature
+    icon: mdi:thermometer-low
+    entity_category: config
+
+  - entity_id: battery_heater_start_temp
+    mode: "box"
+    name: Battery Heater Start Temperature
+    register: battery_heater_start_temp
+    min: -40
+    max: 100
+    step: 1
+    unit_of_measurement: °C
+    device_class: temperature
+    icon: mdi:radiator
+    entity_category: config
+
+  - entity_id: battery_heater_stop_temp
+    mode: "box"
+    name: Battery Heater Stop Temperature
+    register: battery_heater_stop_temp
+    min: -40
+    max: 100
+    step: 1
+    unit_of_measurement: °C
+    device_class: temperature
+    icon: mdi:radiator-off
+    entity_category: config
+
+  - entity_id: temperature_compensation_coefficient
+    mode: "box"
+    name: Temperature Compensation Coefficient
+    register: temperature_compensation_coefficient
+    min: 0
+    max: 10
+    step: 1
+    unit_of_measurement: mV/°C/2V
+    icon: mdi:thermometer-auto
+    entity_category: config
+
+  # --------------------------------------------------------------------------
+  # TIME DELAY SETTINGS
+  # --------------------------------------------------------------------------
+
+  - entity_id: over_discharge_delay
+    mode: "box"
+    name: Over-Discharge Delay
+    register: over_discharge_delay
+    min: 0
+    max: 120
+    step: 1
+    unit_of_measurement: s
+    device_class: duration
+    icon: mdi:timer-sand
+    entity_category: config
+
+  - entity_id: equalizing_charge_time
+    mode: "box"
+    name: Equalizing Charge Time
+    register: equalizing_charge_time
+    min: 0
+    max: 900
+    step: 1
+    unit_of_measurement: min
+    device_class: duration
+    icon: mdi:timer
+    entity_category: config
+
+  - entity_id: boost_charge_time
+    mode: "box"
+    name: Boost Charge Time
+    register: boost_charge_time
+    min: 10
+    max: 900
+    step: 1
+    unit_of_measurement: min
+    device_class: duration
+    icon: mdi:timer-outline
+    entity_category: config
+
+  - entity_id: equalizing_charge_interval
+    mode: "box"
+    name: Equalizing Charge Interval
+    register: equalizing_charge_interval
+    min: 0
+    max: 255
+    step: 1
+    unit_of_measurement: days
+    icon: mdi:calendar-clock
+    entity_category: config
+
+  - entity_id: equalizing_charge_timeout
+    mode: "box"
+    name: Equalizing Charge Timeout
+    register: equalizing_charge_timeout
+    min: 5
+    max: 900
+    step: 1
+    unit_of_measurement: min
+    device_class: duration
+    icon: mdi:timer-alert
+    entity_category: config
+
+  # --------------------------------------------------------------------------
+  # OUTPUT SETTINGS
+  # --------------------------------------------------------------------------
+
+  - entity_id: output_voltage
+    mode: "box"
+    name: AC Output Voltage
+    register: output_voltage
+    min: 100
+    max: 264
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:sine-wave
+    entity_category: config
+
+  - entity_id: output_frequency
+    mode: "box"
+    name: AC Output Frequency
+    register: output_frequency
+    min: 45
+    max: 65
+    step: 0.01
+    unit_of_measurement: Hz
+    device_class: frequency
+    icon: mdi:waveform
+    entity_category: config
+
+  # --------------------------------------------------------------------------
+  # POWER SETTINGS
+  # --------------------------------------------------------------------------
+
+  - entity_id: derate_power
+    mode: "box"
+    name: Derate Power
+    register: derate_power
+    min: 1000
+    max: 15000
+    step: 100
+    unit_of_measurement: W
+    device_class: power
+    icon: mdi:transmission-tower-export
+    entity_category: config
+
+  - entity_id: max_grid_power
+    mode: "box"
+    name: Max Grid Power
+    register: max_grid_power
+    min: 0
+    max: 65535
+    step: 10
+    unit_of_measurement: W
+    device_class: power
+    icon: mdi:transmission-tower
+    entity_category: config
+
+  - entity_id: generator_rated_power
+    mode: "box"
+    name: Generator Rated Power
+    register: generator_rated_power
+    min: 0
+    max: 65535
+    step: 100
+    unit_of_measurement: W
+    device_class: power
+    icon: mdi:generator-stationary
+    entity_category: config
+
+  # --------------------------------------------------------------------------
+  # GRID-TIE SETTINGS (Advanced)
+  # --------------------------------------------------------------------------
+
+  - entity_id: grid_active_power_set
+    mode: "box"
+    name: Grid Active Power Export
+    register: grid_active_power_set
+    min: 0
+    max: 65000
+    step: 100
+    unit_of_measurement: W
+    device_class: power
+    icon: mdi:transmission-tower-export
+    entity_category: config
+
+  - entity_id: grid_power_factor
+    mode: "box"
+    name: Grid Power Factor
+    register: grid_power_factor
+    min: -1.0
+    max: 1.0
+    step: 0.001
+    icon: mdi:sine-wave
+    entity_category: config
+
+  - entity_id: grid_reactive_power
+    mode: "box"
+    name: Grid Reactive Power
+    register: grid_reactive_power
+    min: -100
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:percent
+    entity_category: config
+
+  - entity_id: grid_standard
+    mode: "box"
+    name: Grid Standard
+    register: grid_standard
+    min: 0
+    max: 100
+    step: 1
+    icon: mdi:certificate
+    entity_category: config
+
+  # --------------------------------------------------------------------------
+  # GRID PROTECTION VOLTAGE SETTINGS
+  # --------------------------------------------------------------------------
+
+  - entity_id: grid_uv_level1
+    mode: "box"
+    name: Grid Under-Voltage Level 1
+    register: grid_uv_level1
+    min: 0
+    max: 270
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:flash-alert
+    entity_category: config
+
+  - entity_id: grid_uv_time1
+    mode: "box"
+    name: Grid UV Level 1 Delay
+    register: grid_uv_time1
+    min: 20
+    max: 600000
+    step: 20
+    unit_of_measurement: ms
+    icon: mdi:timer-cog
+    entity_category: config
+
+  - entity_id: grid_uv_resume_level1
+    mode: "box"
+    name: Grid UV Level 1 Recovery
+    register: grid_uv_resume_level1
+    min: 0
+    max: 270
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:flash-triangle
+    entity_category: config
+
+  - entity_id: grid_uv_resume_time1
+    mode: "box"
+    name: Grid UV Level 1 Recovery Delay
+    register: grid_uv_resume_time1
+    min: 20
+    max: 600000
+    step: 20
+    unit_of_measurement: ms
+    icon: mdi:timer-check
+    entity_category: config
+
+  - entity_id: grid_uv_level2
+    mode: "box"
+    name: Grid Under-Voltage Level 2
+    register: grid_uv_level2
+    min: 0
+    max: 270
+    step: 0.1
+    unit_of_measurement: V
+    device_class: voltage
+    icon: mdi:flash-alert-outline
+    entity_category: config
+
+  - entity_id: grid_uv_time2
+    mode: "box"
+    name: Grid UV Level 2 Delay
+    register: grid_uv_time2
+    min: 20
+    max: 600000
+    step: 20
+    unit_of_measurement: ms
+    icon: mdi:timer-cog-outline
+    entity_category: config
+
+  # --------------------------------------------------------------------------
+  # COMMUNICATION AND SYSTEM SETTINGS
+  # --------------------------------------------------------------------------
+
+  - entity_id: rs485_address
+    mode: "box"
+    name: RS485 Address
+    register: rs485_address
+    min: 1
+    max: 254
+    step: 1
+    icon: mdi:identifier
+    entity_category: config
+
+  - entity_id: bms_protocol
+    mode: "box"
+    name: BMS Protocol
+    register: bms_protocol
+    min: 0
+    max: 30
+    step: 1
+    icon: mdi:protocol
+    entity_category: config
+
+  - entity_id: bms_charge_limit_mode
+    mode: "box"
+    name: BMS Charge Limit Mode
+    register: bms_charge_limit_mode
+    min: 0
+    max: 2
+    step: 1
+    icon: mdi:battery-charging-wireless
+    entity_category: config
+
+# ============================================================================
+# BINARY SENSOR ENTITIES
+# ============================================================================
+binary_sensors:
+  # --------------------------------------------------------------------------
+  # PHASE 4 - BINARY SENSOR
+  # --------------------------------------------------------------------------
+
+  - entity_id: fault_detected
+    name: Fault Detected
+    description: Indicates if any system fault or error condition has been detected by the inverter - turns on when problems require attention
+    source_type: coordinator_data
+    data_key: fault_detected
+    device_class: problem
+    icon: mdi:alert-circle

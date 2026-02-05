@@ -1,0 +1,40 @@
+# Monthly Maintenance Reminder
+# Sends monthly reminders for system maintenance tasks
+#
+# Requirements:
+# - None (uses Home Assistant time triggers)
+#
+# Usage:
+# 1. Copy this file to your config/automations directory
+# 2. Adjust day of month (default: 1st of each month)
+# 3. Adjust time (default: 9:00 AM)
+# 4. Customize maintenance tasks in the message
+
+automation:
+  - alias: "SRNE: Monthly Maintenance Reminder"
+    description: "Monthly reminder for inverter maintenance"
+
+    trigger:
+      - platform: template
+        value_template: "{{ now().day == 1 and now().hour == 9 and now().minute == 0 }}"
+
+    action:
+      - service: notify.notify
+        data:
+          title: "SRNE Monthly Maintenance"
+          message: >
+            Time for monthly SRNE inverter maintenance:
+
+            Checklist:
+            - Check battery terminals for corrosion
+            - Verify all connections are tight
+            - Clean dust from inverter vents
+            - Check PV panel cleanliness
+            - Review error logs
+            - Test battery voltage
+            - Verify cooling fan operation
+
+            Current Status:
+            - Battery SOC: {{ states('sensor.srne_inverter_battery_soc') }}%
+            - Battery Voltage: {{ states('sensor.srne_inverter_battery_voltage') }}V
+            - System Runtime: {{ states('sensor.srne_inverter_uptime') | default('N/A') }}

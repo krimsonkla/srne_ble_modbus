@@ -1,0 +1,36 @@
+# Simple Grid Failure Response
+# Switches inverter to battery priority when grid voltage drops to 0
+#
+# Requirements:
+# - sensor.srne_inverter_grid_voltage (Grid voltage sensor)
+# - select.srne_inverter_output_priority (Output priority control)
+#
+# Usage:
+# 1. Copy this file to your config/automations directory
+# 2. Verify your entity IDs match
+# 3. Adjust priority mode if needed (BAT for battery priority)
+
+automation:
+  - alias: "SRNE: Grid Failure Auto-Switch"
+    description: "Switch to battery priority when grid fails"
+
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.srne_inverter_grid_voltage
+        below: 1
+        for:
+          seconds: 5
+
+    action:
+      - service: select.select_option
+        target:
+          entity_id: select.srne_inverter_output_priority
+        data:
+          option: "BAT"
+
+      - service: notify.notify
+        data:
+          title: "Grid Failure Detected"
+          message: "Grid voltage is 0V. Switched to battery priority mode."
+          data:
+            priority: high

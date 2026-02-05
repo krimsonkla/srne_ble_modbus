@@ -1,0 +1,402 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select SRNE Inverter",
+        "description": "Select your SRNE HF Series inverter from the list of discovered BLE devices.",
+        "data": {
+          "address": "Device"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Confirm SRNE Inverter",
+        "description": "Do you want to add {name} to Home Assistant?"
+      }
+    },
+    "error": {
+      "device_not_found": "Device not found. Make sure the inverter is powered on and within Bluetooth range.",
+      "no_devices_found": "No SRNE devices found. Make sure your inverter is powered on and the BLE adapter is working.",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SRNE Inverter Configuration",
+        "description": "Choose a configuration section to modify",
+        "menu_options": {
+          "battery_config": "Battery Configuration (Inverter)",
+          "battery_management": "Battery Management (Inverter)",
+          "inverter_output": "Inverter Output (Inverter)",
+          "expert": "Expert Settings (Inverter)",
+          "integration": "Integration Settings",
+          "features": "Features (Sensors & Entities)",
+          "presets": "Configuration Presets"
+        }
+      },
+      "battery_config": {
+        "title": "Battery Configuration",
+        "description": "Configure battery capacity and voltage (inverter settings only).",
+        "data": {
+          "battery_capacity": "Battery Capacity (Ah)",
+          "battery_voltage": "Battery System Voltage (V)",
+          "output_priority": "Energy Priority Mode",
+          "polling_interval": "Polling Interval (seconds)",
+          "enable_diagnostic_sensors": "Enable Diagnostic Sensors",
+          "enable_calculated_sensors": "Enable Calculated Sensors",
+          "back_to_menu": "Back to Menu (without saving)"
+        },
+        "data_description": {
+          "battery_capacity": "Total capacity of your battery bank in amp-hours. This must match your actual battery system capacity for accurate SOC calculations.",
+          "battery_voltage": "CRITICAL: Must match your physical battery system voltage. Common values: 12V, 24V, 36V, or 48V. Incorrect voltage can damage equipment.",
+          "output_priority": "Determines how the inverter prioritizes energy sources. Solar First uses solar power preferentially, Mains First uses grid power, SBU follows Solar-Battery-Utility priority.",
+          "polling_interval": "How often to read data from the inverter via Bluetooth. Lower values provide more frequent updates but may impact Bluetooth performance. Recommended: 15-30 seconds.",
+          "enable_diagnostic_sensors": "Enable sensors that track integration health, Bluetooth RSSI, connection quality, update duration, and error statistics. Useful for troubleshooting.",
+          "enable_calculated_sensors": "Enable derived sensors like system efficiency, grid dependency, self-sufficiency ratio, and energy flow metrics. These calculate useful insights from raw data.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page."
+        }
+      },
+      "battery_management": {
+        "title": "Battery Management",
+        "description": "Configure battery charging, discharging, and protection settings.",
+        "data": {
+          "max_charge_current": "Maximum Charge Current (A)",
+          "max_ac_charge_current": "Maximum AC Charge Current (A)",
+          "pv_max_charge_current": "Maximum PV Charge Current (A)",
+          "discharge_stop_soc": "Discharge Stop SOC (%)",
+          "low_soc_alarm": "Low SOC Alarm (%)",
+          "switch_to_ac_soc": "Switch to AC SOC (%)",
+          "switch_to_battery_soc": "Switch to Battery SOC (%)",
+          "charge_source_priority": "Charge Source Priority",
+          "battery_type": "Battery Type",
+          "back_to_menu": "Back to Menu (without saving)"
+        },
+        "data_description": {
+          "max_charge_current": "Maximum total charging current from all sources combined. Should not exceed your battery's maximum charge rate (typically 0.5C to 1C for lead-acid, up to 2C for LiFePO4).",
+          "max_ac_charge_current": "Maximum charging current from AC/grid source. Must be less than or equal to Maximum Charge Current. Consider your grid connection capacity.",
+          "pv_max_charge_current": "Maximum charging current from solar panels. Should match your MPPT controller rating and battery specifications.",
+          "discharge_stop_soc": "Battery discharge will stop at this SOC level to protect battery health. Recommended: 10-20% for lead-acid, 10-30% for lithium.",
+          "low_soc_alarm": "An alarm will trigger when battery SOC drops below this level. Should be higher than Discharge Stop SOC.",
+          "switch_to_ac_soc": "When battery SOC drops to this level, the system will switch to AC power if available. Should be higher than Discharge Stop SOC.",
+          "switch_to_battery_soc": "When battery SOC reaches this level during charging, the system will switch to battery power. Typically 70-90%.",
+          "charge_source_priority": "Determines which energy source charges the battery first. PV Priority uses solar first with AC backup, AC Priority uses grid first, Hybrid uses both simultaneously, PV Only uses only solar.",
+          "battery_type": "CRITICAL: Select the exact chemistry of your batteries. Incorrect selection will cause improper charging voltages and may damage or destroy your batteries. When in doubt, select User Defined and configure voltages manually.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page."
+        }
+      },
+      "inverter_output": {
+        "title": "Inverter Output Settings",
+        "description": "Configure inverter output parameters and AC input settings. \u26a0\ufe0f CRITICAL: Output voltage and frequency must match your region's electrical standards.",
+        "data": {
+          "output_voltage": "Output Voltage (V)",
+          "output_frequency": "Output Frequency (Hz)",
+          "ac_input_range": "AC Input Range",
+          "charge_source_priority": "Charge Source Priority",
+          "power_saving_mode": "Power Saving Mode",
+          "back_to_menu": "Back to Menu (without saving)"
+        },
+        "data_description": {
+          "output_voltage": "\u26a0\ufe0f CRITICAL: Output voltage for connected loads. Must match your region's standard voltage. North America: 120V, Europe/UK: 230V, Japan: 100V. Incorrect voltage can damage connected equipment.",
+          "output_frequency": "\u26a0\ufe0f CRITICAL: AC frequency for connected loads. Must match your region's standard. North America: 60Hz, Europe/Asia: 50Hz. Incorrect frequency can damage motors and electronics.",
+          "ac_input_range": "Acceptable AC input voltage range. Narrow Range (UPS Mode): Strict tolerance for clean power, fast switching. Wide Range (Appliance Mode): Greater tolerance for generators and unstable grids, slower switching.",
+          "charge_source_priority": "Determines which energy source charges the battery first. PV Priority: Solar first with AC backup. AC Priority: Grid first. Hybrid Mode: Both sources simultaneously. PV Only: Solar exclusively (disables AC charging).",
+          "power_saving_mode": "When enabled, inverter enters low-power mode when load is below ~50W. Saves 10-20W idle consumption but adds ~20ms switching delay. Disable for UPS applications requiring instant response.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page."
+        }
+      },
+      "integration": {
+        "title": "Integration Settings",
+        "description": "Configure integration behavior and communication settings.",
+        "data": {
+          "command_delay_write": "Write Command Delay (seconds)",
+          "batch_read_delay": "Batch Read Delay (seconds)",
+          "connection_timeout": "Connection Timeout (milliseconds)",
+          "retry_attempts": "Retry Attempts",
+          "log_modbus_traffic": "Log Modbus Traffic",
+          "back_to_menu": "Back to Menu (without saving)"
+        },
+        "data_description": {
+          "command_delay_write": "Delay between write commands to the inverter. Write operations need more processing time than reads. Default: 0.5s. Increase if write commands fail frequently.",
+          "batch_read_delay": "Delay between batch read operations. Allows the inverter time to process requests and respond. Default: 0.3s. Increase if experiencing CRC errors or timeouts.",
+          "connection_timeout": "Maximum time to wait for BLE connection establishment. Default: 2000ms (2 seconds). Increase if connection fails in areas with BLE interference.",
+          "retry_attempts": "Number of times to retry failed commands before giving up. Default: 3. Higher values improve reliability but slow down error recovery.",
+          "log_modbus_traffic": "Enable detailed logging of all Modbus commands and responses. Useful for debugging communication issues. WARNING: Generates large log files.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page."
+        }
+      },
+      "expert": {
+        "title": "Expert Settings",
+        "description": "\u26a0\ufe0f WARNING: These settings can damage equipment if configured incorrectly. Only proceed if you fully understand the implications. All changes are logged for audit purposes.",
+        "data": {
+          "expert_mode_acknowledged": "I understand the risks of modifying expert settings",
+          "grid_voltage_low": "Grid Low Voltage Threshold (V)",
+          "grid_voltage_high": "Grid High Voltage Threshold (V)",
+          "grid_frequency_low": "Grid Low Frequency Threshold (Hz)",
+          "grid_frequency_high": "Grid High Frequency Threshold (Hz)",
+          "back_to_menu": "Back to Menu (without saving)"
+        },
+        "data_description": {
+          "expert_mode_acknowledged": "\u26a0\ufe0f REQUIRED: You must acknowledge that you understand the risks before modifying expert settings. Incorrect configuration can damage equipment, void warranties, and create safety hazards.",
+          "grid_voltage_low": "\u26a0\ufe0f CRITICAL: Grid voltage below this threshold triggers disconnect. Must comply with local electrical codes. Typical: 170-190V for 230V systems, 90-105V for 120V systems. Setting too low risks equipment damage.",
+          "grid_voltage_high": "\u26a0\ufe0f CRITICAL: Grid voltage above this threshold triggers disconnect. Must comply with local electrical codes. Typical: 250-280V for 230V systems, 130-140V for 120V systems. Setting too high risks equipment damage.",
+          "grid_frequency_low": "\u26a0\ufe0f CRITICAL: Grid frequency below this threshold triggers disconnect. Must comply with grid codes. Typical: 49.5Hz for 50Hz regions, 59.5Hz for 60Hz regions. Incorrect setting can damage motors and electronics.",
+          "grid_frequency_high": "\u26a0\ufe0f CRITICAL: Grid frequency above this threshold triggers disconnect. Must comply with grid codes. Typical: 50.5Hz for 50Hz regions, 60.5Hz for 60Hz regions. Incorrect setting can damage motors and electronics.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page."
+        }
+      },
+      "features": {
+        "title": "Enable/Disable Features",
+        "description": "Control which sensors and entities are enabled in Home Assistant. Disabling unused features reduces entity count and improves performance.",
+        "data": {
+          "enable_configurable_numbers": "Enable Configurable Number Entities",
+          "enable_configurable_selects": "Enable Configurable Select Entities",
+          "enable_diagnostic_sensors": "Enable Diagnostic Sensors",
+          "enable_calculated_sensors": "Enable Calculated Sensors",
+          "enable_energy_dashboard": "Enable Energy Dashboard Integration",
+          "back_to_menu": "Back to Menu (without saving)"
+        },
+        "data_description": {
+          "enable_configurable_numbers": "Enable Number entities for runtime configuration of inverter settings (charge currents, SOC thresholds, voltages, etc.). These entities allow you to modify inverter parameters directly from Home Assistant. \u26a0\ufe0f Changes are written directly to the inverter.",
+          "enable_configurable_selects": "Enable Select entities for runtime configuration of inverter modes (output priority, charge source priority, battery type, etc.). These entities allow you to change operational modes from Home Assistant. \u26a0\ufe0f Changes are written directly to the inverter.",
+          "enable_diagnostic_sensors": "Enable diagnostic sensors that track integration health: BLE RSSI, connection status, update duration, failed reads, CRC errors, and retry statistics. Useful for troubleshooting connection and performance issues.",
+          "enable_calculated_sensors": "Enable calculated sensors that derive useful metrics: system efficiency, grid dependency, self-sufficiency ratio, PV utilization, battery contribution, and energy flow analysis. These provide insights beyond raw register data.",
+          "enable_energy_dashboard": "Enable integration with Home Assistant's Energy Dashboard. Provides energy sensors in the correct format for tracking solar production, battery charge/discharge, grid import/export, and load consumption over time.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page."
+        }
+      },
+      "presets": {
+        "title": "Configuration Presets",
+        "description": "Apply pre-configured settings optimized for common use cases. These presets will modify multiple settings at once.",
+        "data": {
+          "preset": "Select Configuration Preset",
+          "confirm_preset": "I understand this will modify multiple settings"
+        },
+        "menu_options": {
+          "off_grid_solar": "Off-Grid Solar System",
+          "grid_tied_solar": "Grid-Tied Solar System",
+          "ups_mode": "UPS Mode",
+          "time_of_use": "Time-of-Use Optimization"
+        },
+        "preset_descriptions": {
+          "off_grid_solar": "Optimized for standalone solar and battery systems with no grid connection. Prioritizes solar and battery power. Disables AC charging. Use when: Operating fully off-grid with solar as primary power source.",
+          "grid_tied_solar": "Optimized for grid-connected systems with solar priority. Uses solar first, grid as backup. Maintains battery health with smart charging. Use when: Connected to grid but want to maximize solar usage and reduce electricity bills.",
+          "ups_mode": "Optimized for uninterruptible power supply applications. Grid power primary, battery backup for outages. Fast switching, narrow AC input range for clean power. Use when: Protecting sensitive equipment from power outages and requiring seamless transition.",
+          "time_of_use": "Optimized for Time-of-Use electricity rates. Charges battery during off-peak hours, discharges during peak hours. Maximizes cost savings. Use when: Utility has time-based pricing and you want to minimize electricity costs."
+        }
+      }
+    },
+    "error": {
+      "invalid_voltage": "Battery voltage must be 12V, 24V, 36V, or 48V",
+      "invalid_range": "Value must be between {min} and {max}",
+      "invalid_frequency": "Frequency must be either 50Hz or 60Hz",
+      "relationship_violation": "{entity1} cannot exceed {entity2}",
+      "soc_order_violation": "SOC thresholds must be in order: Discharge Stop < Low Alarm <= Switch to AC < Switch to Battery",
+      "current_exceeds_capacity": "Charge current exceeds safe rate for battery capacity (should be <= {max_safe}A)",
+      "connection_failed": "Failed to connect to inverter. Check Bluetooth connection and ensure inverter is powered on.",
+      "write_failed": "Failed to write setting to inverter: {error}",
+      "verification_failed": "Setting was written but verification failed. Wrote {written}, read back {read}",
+      "battery_chemistry_mismatch": "Selected battery type is incompatible with configured voltage thresholds",
+      "voltage_too_high": "Voltage setting is dangerously high for selected battery type",
+      "voltage_too_low": "Voltage setting may cause battery damage or incomplete charging",
+      "expert_mode_required": "You must acknowledge the expert mode warning before modifying these settings",
+      "preset_conflict": "Cannot apply preset: one or more settings conflict with current configuration"
+    },
+    "abort": {
+      "already_configured": "This device is already configured",
+      "invalid_auth": "Invalid authentication",
+      "user_cancelled": "Configuration cancelled by user",
+      "write_timeout": "Inverter did not respond to configuration command within timeout period"
+    }
+  },
+  "selector": {
+    "output_priority": {
+      "options": {
+        "solar_first": "Solar First - Use solar power first, grid/AC as backup",
+        "mains_first": "Mains First - Use grid power first, solar/battery as backup",
+        "sbu": "SBU (Solar-Battery-Utility) - Prioritize in order: Solar \u2192 Battery \u2192 Grid"
+      }
+    },
+    "charge_source_priority": {
+      "options": {
+        "pv_priority": "PV Priority - Solar charges first, AC charges as backup",
+        "ac_priority": "AC Priority - Grid charges first, solar charges as backup",
+        "hybrid": "Hybrid Mode - Both sources charge simultaneously (PV prioritized)",
+        "pv_only": "PV Only - Only solar charges battery (no AC charging)"
+      }
+    },
+    "battery_type": {
+      "options": {
+        "user_defined": "User Defined - Custom voltage settings",
+        "sealed_lead_acid": "Sealed Lead Acid (AGM/VRLA)",
+        "flooded_lead_acid": "Flooded Lead Acid (FLA)",
+        "gel": "GEL Battery",
+        "lifepo4_14s": "LiFePO4 14S (44.8V nominal)",
+        "lifepo4_15s": "LiFePO4 15S (48V nominal)",
+        "lifepo4_16s": "LiFePO4 16S (51.2V nominal)",
+        "lifepo4_7s": "LiFePO4 7S (22.4V nominal)",
+        "lifepo4_8s": "LiFePO4 8S (25.6V nominal)",
+        "lifepo4_9s": "LiFePO4 9S (28.8V nominal)",
+        "ternary_lithium_7s": "Ternary Lithium 7S (25.9V nominal)",
+        "ternary_lithium_8s": "Ternary Lithium 8S (29.6V nominal)",
+        "ternary_lithium_13s": "Ternary Lithium 13S (48.1V nominal)",
+        "ternary_lithium_14s": "Ternary Lithium 14S (51.8V nominal)",
+        "user_lithium": "User-Defined Lithium - Custom lithium battery settings"
+      }
+    },
+    "ac_input_range": {
+      "options": {
+        "appliance": "Appliance Mode - Wide voltage range (90-280V), compatible with generators",
+        "ups": "UPS Mode - Narrow voltage range (170-280V), clean power for sensitive equipment"
+      }
+    },
+    "parallel_mode": {
+      "options": {
+        "standalone": "Standalone - Single inverter operation",
+        "parallel": "Parallel - Multiple inverters synchronized",
+        "three_phase": "Three-Phase - Three inverters for 3-phase output"
+      }
+    },
+    "bms_protocol": {
+      "options": {
+        "none": "None - No BMS communication",
+        "pylontech": "Pylontech",
+        "sol_ark": "Sol-Ark",
+        "pace": "PACE",
+        "lifepo4": "Generic LiFePO4"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_soc": {
+        "name": "Battery SOC"
+      },
+      "pv_power": {
+        "name": "PV Power"
+      },
+      "grid_power": {
+        "name": "Grid Power"
+      },
+      "load_power": {
+        "name": "Load Power"
+      },
+      "battery_voltage": {
+        "name": "Battery Voltage"
+      },
+      "battery_current": {
+        "name": "Battery Current"
+      },
+      "inverter_temperature": {
+        "name": "Inverter Temperature"
+      },
+      "battery_temperature": {
+        "name": "Battery Temperature"
+      },
+      "pv_energy_today": {
+        "name": "PV Energy Today"
+      },
+      "load_energy_today": {
+        "name": "Load Energy Today"
+      },
+      "pv_energy_total": {
+        "name": "PV Energy Total"
+      },
+      "load_energy_total": {
+        "name": "Load Energy Total"
+      },
+      "battery_charge_ah_today": {
+        "name": "Battery Charge AH Today"
+      },
+      "battery_discharge_ah_today": {
+        "name": "Battery Discharge AH Today"
+      },
+      "work_days_total": {
+        "name": "Work Days Total"
+      },
+      "charge_state": {
+        "name": "Charge State"
+      },
+      "grid_voltage": {
+        "name": "Grid Voltage"
+      },
+      "grid_frequency": {
+        "name": "Grid Frequency"
+      },
+      "inverter_voltage": {
+        "name": "Inverter Voltage"
+      },
+      "inverter_frequency": {
+        "name": "Inverter Frequency"
+      },
+      "ac_charge_current": {
+        "name": "AC Charge Current"
+      },
+      "pv_charge_current": {
+        "name": "PV Charge Current"
+      },
+      "load_ratio": {
+        "name": "Load Ratio"
+      },
+      "self_sufficiency": {
+        "name": "Self Sufficiency"
+      },
+      "grid_dependency": {
+        "name": "Grid Dependency"
+      },
+      "battery_power": {
+        "name": "Battery Power"
+      },
+      "system_efficiency": {
+        "name": "System Efficiency"
+      },
+      "ble_connection_quality": {
+        "name": "BLE Connection Quality"
+      },
+      "last_update": {
+        "name": "Last Update"
+      },
+      "update_duration": {
+        "name": "Update Duration"
+      },
+      "failed_reads_count": {
+        "name": "Failed Reads Count"
+      },
+      "success_rate": {
+        "name": "Success Rate"
+      }
+    },
+    "switch": {
+      "ac_power": {
+        "name": "AC Power"
+      }
+    },
+    "select": {
+      "energy_priority": {
+        "name": "Energy Priority",
+        "state": {
+          "solar_first": "Solar First",
+          "utility_first": "Utility First",
+          "battery_first": "Battery First"
+        }
+      }
+    },
+    "binary_sensor": {
+      "fault_detected": {
+        "name": "Fault Detected"
+      }
+    }
+  },
+  "services": {
+    "force_refresh": {
+      "name": "Force Refresh",
+      "description": "Force an immediate data refresh from the inverter"
+    },
+    "reset_statistics": {
+      "name": "Reset Statistics",
+      "description": "Reset diagnostic statistics counters"
+    }
+  }
+}

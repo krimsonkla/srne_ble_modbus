@@ -1,0 +1,19 @@
+{
+  "domain": "srne_ble_modbus",
+  "name": "SRNE BLE Modbus",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/krimsonkla/srne_ble_modbus",
+  "homeassistant": "2024.12.0",
+  "icon": "mdi:power-settings",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/krimsonkla/srne_ble_modbus/issues",
+  "requirements": ["bleak>=0.21.0", "bleak-retry-connector>=3.4.0"],
+  "version": "0.5.0",
+  "bluetooth": [
+    {
+      "local_name": "E60*"
+    }
+  ]
+}

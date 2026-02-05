@@ -1,0 +1,152 @@
+# Configurable Number Entities for SRNE Inverter
+# Pilot configuration for number platform integration
+#
+# Each number entity supports:
+# - entity_id: Unique identifier for the entity
+# - name: Human-readable name
+# - description: Optional detailed description
+# - register: Register name (looked up in registers section)
+# - scale: Scaling factor for display (register_value * scale = display_value)
+# - unit: Unit of measurement
+# - min: Minimum allowed value
+# - max: Maximum allowed value
+# - step: Step increment for adjustments
+# - mode: UI mode (slider, box, or auto)
+# - device_class: Home Assistant device class (optional)
+# - icon: Material Design Icon (optional)
+# - entity_category: config, diagnostic, or null
+# - enabled_by_default: true or false
+# - optimistic: true for immediate UI feedback, false for confirmed state
+
+numbers:
+  # Battery Charge Settings
+  - entity_id: max_ac_charge_current
+    name: "Max AC Charge Current"
+    description: "Maximum current allowed for AC charging from grid to battery"
+    register: max_ac_charge_current
+    scale: 0.1
+    unit: A
+    min: 0
+    max: 200
+    step: 1
+    mode: slider
+    device_class: current
+    icon: mdi:current-ac
+    entity_category: config
+    enabled_by_default: false
+    optimistic: true
+
+  - entity_id: max_charge_current
+    name: "Max Charge Current"
+    description: "Maximum charging current limit for battery"
+    register: max_charge_current
+    scale: 0.1
+    unit: A
+    min: 0
+    max: 200
+    step: 1
+    mode: slider
+    device_class: current
+    icon: mdi:battery-charging
+    entity_category: config
+    enabled_by_default: false
+    optimistic: true
+
+  - entity_id: float_charge_voltage
+    name: "Float Charge Voltage"
+    description: "Battery float voltage for trickle charge maintenance"
+    register: float_charge_voltage
+    scale: 0.1
+    unit: V
+    min: 40
+    max: 60
+    step: 0.1
+    mode: box
+    device_class: voltage
+    icon: mdi:battery-charging-medium
+    entity_category: config
+    enabled_by_default: false
+    optimistic: true
+
+  - entity_id: bulk_charge_voltage
+    name: "Bulk Charge Voltage"
+    description: "Battery bulk charge voltage target"
+    register: bulk_charge_voltage
+    scale: 0.1
+    unit: V
+    min: 40
+    max: 60
+    step: 0.1
+    mode: box
+    device_class: voltage
+    icon: mdi:battery-charging-high
+    entity_category: config
+    enabled_by_default: false
+    optimistic: true
+
+  # Battery Protection Settings
+  - entity_id: battery_low_voltage
+    name: "Battery Low Voltage"
+    description: "Low voltage cutoff threshold to protect battery from deep discharge"
+    register: battery_low_voltage
+    scale: 0.1
+    unit: V
+    min: 40
+    max: 55
+    step: 0.1
+    mode: box
+    device_class: voltage
+    icon: mdi:battery-alert-variant-outline
+    entity_category: config
+    enabled_by_default: false
+    optimistic: true
+
+  - entity_id: battery_shutdown_voltage
+    name: "Battery Shutdown Voltage"
+    description: "Critical low voltage threshold for emergency shutdown"
+    register: battery_shutdown_voltage
+    scale: 0.1
+    unit: V
+    min: 40
+    max: 50
+    step: 0.1
+    mode: box
+    device_class: voltage
+    icon: mdi:battery-off-outline
+    entity_category: config
+    enabled_by_default: false
+    optimistic: true
+
+  # Grid Settings
+  - entity_id: grid_charge_start_voltage
+    name: "Grid Charge Start Voltage"
+    description: "Battery voltage threshold to begin grid charging"
+    register: grid_charge_start_voltage
+    scale: 0.1
+    unit: V
+    min: 40
+    max: 58
+    step: 0.1
+    mode: box
+    device_class: voltage
+    icon: mdi:transmission-tower
+    entity_category: config
+    enabled_by_default: false
+    optimistic: true
+
+  # Solar Settings
+  - entity_id: pv_power_balance
+    name: "PV Power Balance"
+    description: "Power balance threshold for solar input management"
+    register: pv_power_balance
+    scale: 1
+    unit: W
+    min: 0
+    max: 10000
+    step: 50
+    mode: slider
+    device_class: power
+    icon: mdi:solar-power
+    entity_category: config
+    enabled_by_default: false
+    optimistic: true

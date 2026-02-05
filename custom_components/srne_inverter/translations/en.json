@@ -1,0 +1,652 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select SRNE Inverter",
+        "description": "Select your SRNE HF Series inverter from the list of discovered BLE devices.",
+        "data": {
+          "address": "Device"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Confirm SRNE Inverter",
+        "description": "Do you want to add {name} to Home Assistant?"
+      }
+    },
+    "error": {
+      "device_not_found": "Device not found. Make sure the inverter is powered on and within Bluetooth range.",
+      "no_devices_found": "No SRNE devices found. Make sure your inverter is powered on and the BLE adapter is working.",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SRNE Inverter Configuration",
+        "description": "Choose a configuration section to modify",
+        "menu_options": {
+          "battery_config": "Battery Configuration (Inverter)",
+          "battery_management": "Battery Management (Inverter)",
+          "inverter_output": "Inverter Output (Inverter)",
+          "expert": "Expert Settings (Inverter)",
+          "integration": "Integration Settings",
+          "features": "Features (Sensors & Entities)",
+          "presets": "Configuration Presets"
+        }
+      },
+      "battery_config": {
+        "title": "Battery Configuration",
+        "description": "Configure battery capacity and voltage (inverter settings only).",
+        "data": {
+          "battery_capacity": "Battery Rated Capacity",
+          "battery_voltage": "Battery System Voltage (V)",
+          "output_priority": "Energy Priority Mode",
+          "polling_interval": "Polling Interval (seconds)",
+          "enable_diagnostic_sensors": "Enable Diagnostic Sensors",
+          "enable_calculated_sensors": "Enable Calculated Sensors",
+          "back_to_menu": "Back to Menu (without saving)",
+          "battery_type": "Battery Type"
+        },
+        "data_description": {
+          "battery_capacity": "Total amp-hour capacity of your battery bank",
+          "battery_voltage": "CRITICAL: Must match your physical battery system voltage. Common values: 12V, 24V, 36V, or 48V. Incorrect voltage can damage equipment.",
+          "output_priority": "Determines how the inverter prioritizes energy sources. Solar First uses solar power preferentially, Mains First uses grid power, SBU follows Solar-Battery-Utility priority.",
+          "polling_interval": "How often to read data from the inverter via Bluetooth. Lower values provide more frequent updates but may impact Bluetooth performance. Recommended: 15-30 seconds.",
+          "enable_diagnostic_sensors": "Enable sensors that track integration health, Bluetooth RSSI, connection quality, update duration, and error statistics. Useful for troubleshooting.",
+          "enable_calculated_sensors": "Enable derived sensors like system efficiency, grid dependency, self-sufficiency ratio, and energy flow metrics. These calculate useful insights from raw data.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page.",
+          "battery_type": "Select battery chemistry type"
+        }
+      },
+      "battery_management": {
+        "title": "Battery Management",
+        "description": "Configure battery charging, discharging, and protection settings.",
+        "data": {
+          "max_charge_current": "Maximum Charge Current",
+          "max_ac_charge_current": "Maximum AC Charge Current",
+          "pv_max_charge_current": "Maximum PV Charge Current (A)",
+          "discharge_stop_soc": "Discharge Stop SOC (%)",
+          "low_soc_alarm": "Low SOC Alarm (%)",
+          "switch_to_ac_soc": "Switch to AC SOC (%)",
+          "switch_to_battery_soc": "Switch to Battery SOC (%)",
+          "charge_source_priority": "Charge Source Priority",
+          "battery_type": "Battery Type",
+          "back_to_menu": "Back to Menu (without saving)",
+          "float_charge_voltage": "Float Charge Voltage",
+          "bulk_charge_voltage": "Bulk Charge Voltage",
+          "battery_low_voltage": "Battery Low Voltage",
+          "battery_shutdown_voltage": "Battery Shutdown Voltage",
+          "grid_charge_start_voltage": "Grid Charge Start Voltage",
+          "battery_overvoltage": "Battery Over-Voltage Protection",
+          "battery_charge_limit_voltage": "Charge Limit Voltage",
+          "battery_under_voltage": "Under-Voltage Warning",
+          "charge_max_temperature": "Charge Max Temperature",
+          "charge_min_temperature": "Charge Min Temperature",
+          "discharge_max_temperature": "Discharge Max Temperature",
+          "discharge_min_temperature": "Discharge Min Temperature",
+          "equalizing_charge_voltage": "Equalizing Charge Voltage",
+          "boost_charge_return_voltage": "Boost Charge Return Voltage",
+          "over_discharge_return_voltage": "Over-Discharge Recovery Voltage",
+          "discharge_cutoff_soc": "Discharge Cutoff SOC",
+          "over_discharge_delay": "Over-Discharge Delay",
+          "equalizing_charge_time": "Equalizing Charge Time",
+          "boost_charge_time": "Boost Charge Time",
+          "equalizing_charge_interval": "Equalizing Charge Interval",
+          "temperature_compensation_coefficient": "Temperature Compensation Coefficient",
+          "stop_charge_current": "Stop Charge Current (Lithium)",
+          "stop_charge_soc": "Stop Charge SOC",
+          "soc_low_alarm": "Low SOC Alarm",
+          "soc_switch_to_grid": "SOC Switch to Grid",
+          "soc_switch_to_battery": "SOC Switch to Battery",
+          "inverter_switch_voltage": "Inverter Switch Voltage",
+          "equalizing_charge_timeout": "Equalizing Charge Timeout",
+          "battery_temp_compensation_enable": "Temperature Compensation",
+          "equalizing_charge_enable": "Equalizing Charge Enable"
+        },
+        "data_description": {
+          "max_charge_current": "Overall maximum charging current from all sources (PV + AC)",
+          "max_ac_charge_current": "Maximum current allowed when charging from AC grid power",
+          "pv_max_charge_current": "Maximum charging current from solar panels. Should match your MPPT controller rating and battery specifications.",
+          "discharge_stop_soc": "Battery discharge will stop at this SOC level to protect battery health. Recommended: 10-20% for lead-acid, 10-30% for lithium.",
+          "low_soc_alarm": "An alarm will trigger when battery SOC drops below this level. Should be higher than Discharge Stop SOC.",
+          "switch_to_ac_soc": "When battery SOC drops to this level, the system will switch to AC power if available. Should be higher than Discharge Stop SOC.",
+          "switch_to_battery_soc": "When battery SOC reaches this level during charging, the system will switch to battery power. Typically 70-90%.",
+          "charge_source_priority": "Determines which energy source charges the battery first. PV Priority uses solar first with AC backup, AC Priority uses grid first, Hybrid uses both simultaneously, PV Only uses only solar.",
+          "battery_type": "CRITICAL: Select the exact chemistry of your batteries. Incorrect selection will cause improper charging voltages and may damage or destroy your batteries. When in doubt, select User Defined and configure voltages manually.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page.",
+          "float_charge_voltage": "Voltage to maintain battery at full charge (float stage)",
+          "bulk_charge_voltage": "Target voltage for bulk/boost charging stage",
+          "battery_low_voltage": "Voltage at which load is disconnected to protect battery",
+          "battery_shutdown_voltage": "Critical voltage for immediate system shutdown",
+          "grid_charge_start_voltage": "Battery voltage at which AC charging begins",
+          "battery_overvoltage": "Voltage at which charging stops to prevent battery damage",
+          "battery_charge_limit_voltage": "Maximum voltage allowed during charging cycle",
+          "battery_under_voltage": "Voltage at which low battery warning is triggered",
+          "charge_max_temperature": "Stop charging when battery exceeds this temperature",
+          "charge_min_temperature": "Stop charging when battery below this temperature",
+          "discharge_max_temperature": "Stop discharging when battery exceeds this temperature",
+          "discharge_min_temperature": "Stop discharging when battery below this temperature",
+          "equalizing_charge_voltage": "Voltage for periodic equalization charging",
+          "boost_charge_return_voltage": "If voltage drops below this during float, restart boost charge",
+          "over_discharge_return_voltage": "Battery voltage to resume after over-discharge protection",
+          "discharge_cutoff_soc": "Stop discharging when battery SOC reaches this level",
+          "over_discharge_delay": "Seconds to wait before cutting off load on low voltage",
+          "equalizing_charge_time": "How long to maintain equalizing charge voltage",
+          "boost_charge_time": "Maximum time for boost charging stage",
+          "equalizing_charge_interval": "Days between automatic equalization cycles",
+          "temperature_compensation_coefficient": "Voltage adjustment per degree Celsius",
+          "stop_charge_current": "Stop constant-voltage charging when current drops below this",
+          "stop_charge_soc": "Stop charging when SOC reaches this percentage",
+          "soc_low_alarm": "Trigger low battery alarm at this SOC",
+          "soc_switch_to_grid": "In SBU mode, use grid when SOC drops to this level",
+          "soc_switch_to_battery": "In SBU mode, switch back to battery when SOC rises to this",
+          "inverter_switch_voltage": "Battery voltage to resume inverter operation after grid mode",
+          "equalizing_charge_timeout": "Safety timeout for equalizing charge",
+          "battery_temp_compensation_enable": "Adjust charge voltages based on battery temperature",
+          "equalizing_charge_enable": "Enable periodic automatic equalization"
+        }
+      },
+      "inverter_output": {
+        "title": "Inverter Output Settings",
+        "description": "Configure inverter output parameters and AC input settings. ⚠️ CRITICAL: Output voltage and frequency must match your region's electrical standards.",
+        "data": {
+          "output_voltage": "Output Voltage",
+          "output_frequency": "Output Frequency",
+          "ac_input_range": "AC Input Range",
+          "charge_source_priority": "Charge Source Priority",
+          "power_saving_mode": "Power Saving Mode",
+          "back_to_menu": "Back to Menu (without saving)",
+          "power_control": "Inverter Power Control",
+          "working_mode": "Working Mode",
+          "grid_active_power_set": "Grid Active Power Export",
+          "grid_power_factor": "Grid Power Factor",
+          "grid_reactive_power": "Grid Reactive Power",
+          "grid_standard": "Grid Standard",
+          "zero_export_power": "Zero Export Power",
+          "hvrt_lvrt_enable": "HVRT/LVRT Enable",
+          "grid_connect_voltage_low": "Grid Connect Voltage Low",
+          "grid_connect_voltage_high": "Grid Connect Voltage High",
+          "grid_connect_frequency_low": "Grid Connect Frequency Low",
+          "grid_connect_frequency_high": "Grid Connect Frequency High",
+          "battery_for_grid_enable": "Battery Grid Participation"
+        },
+        "data_description": {
+          "output_voltage": "AC output voltage for your loads",
+          "output_frequency": "AC output frequency for your loads",
+          "ac_input_range": "Acceptable AC input voltage range. Narrow Range (UPS Mode): Strict tolerance for clean power, fast switching. Wide Range (Appliance Mode): Greater tolerance for generators and unstable grids, slower switching.",
+          "charge_source_priority": "Determines which energy source charges the battery first. PV Priority: Solar first with AC backup. AC Priority: Grid first. Hybrid Mode: Both sources simultaneously. PV Only: Solar exclusively (disables AC charging).",
+          "power_saving_mode": "When enabled, inverter enters low-power mode when load is below ~50W. Saves 10-20W idle consumption but adds ~20ms switching delay. Disable for UPS applications requiring instant response.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page.",
+          "power_control": "Turn inverter AC output on or off",
+          "working_mode": "Grid connection mode selection",
+          "grid_active_power_set": "Target power to export to grid",
+          "grid_power_factor": "Target power factor for grid export",
+          "grid_reactive_power": "Reactive power percentage for grid",
+          "grid_standard": "Select grid code compliance standard",
+          "zero_export_power": "Target grid power in anti-export mode",
+          "hvrt_lvrt_enable": "Stay connected during grid voltage fluctuations",
+          "grid_connect_voltage_low": "Minimum voltage required for grid connection",
+          "grid_connect_voltage_high": "Maximum voltage required for grid connection",
+          "grid_connect_frequency_low": "Minimum frequency required for grid connection",
+          "grid_connect_frequency_high": "Maximum frequency required for grid connection",
+          "battery_for_grid_enable": "How battery participates in grid-tie mode"
+        }
+      },
+      "integration": {
+        "title": "Integration Settings",
+        "description": "Configure integration behavior and communication settings.",
+        "data": {
+          "inverter_password": "Inverter Password",
+          "command_delay_write": "Write Command Delay (seconds)",
+          "batch_read_delay": "Batch Read Delay (seconds)",
+          "connection_timeout": "Connection Timeout (milliseconds)",
+          "retry_attempts": "Retry Attempts",
+          "log_modbus_traffic": "Log Modbus Traffic",
+          "back_to_menu": "Back to Menu (without saving)",
+          "system_datetime": "System Date and Time",
+          "rs485_address": "RS485 Address",
+          "alarm_enable": "Alarm/Beeper Enable",
+          "alarm_on_source_loss": "Alarm on Source Loss",
+          "record_faults": "Record Fault History"
+        },
+        "data_description": {
+          "inverter_password": "Optional password for writing configuration registers. Common defaults: 4321 (Menu/Setting), 0000 (Grid Parameter), 111111 or 1111 (Software/App). Set to 0 if no password required. Required for battery type, voltages, and other critical settings.",
+          "command_delay_write": "Delay between write commands to the inverter. Write operations need more processing time than reads. Default: 0.5s. Increase if write commands fail frequently.",
+          "batch_read_delay": "Delay between batch read operations. Allows the inverter time to process requests and respond. Default: 0.3s. Increase if experiencing CRC errors or timeouts.",
+          "connection_timeout": "Maximum time to wait for BLE connection establishment. Default: 2000ms (2 seconds). Increase if connection fails in areas with BLE interference.",
+          "retry_attempts": "Number of times to retry failed commands before giving up. Default: 3. Higher values improve reliability but slow down error recovery.",
+          "log_modbus_traffic": "Enable detailed logging of all Modbus commands and responses. Useful for debugging communication issues. WARNING: Generates large log files.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page.",
+          "system_datetime": "Inverter's internal clock setting",
+          "rs485_address": "Communication address for parallel or multi-device setups",
+          "alarm_enable": "Enable audible alarm for faults and warnings",
+          "alarm_on_source_loss": "Beep when grid or PV input is lost",
+          "record_faults": "Save fault events to history log"
+        }
+      },
+      "expert": {
+        "title": "Expert Settings",
+        "description": "⚠️ WARNING: These settings can damage equipment if configured incorrectly. Only proceed if you fully understand the implications. All changes are logged for audit purposes.",
+        "data": {
+          "expert_mode_acknowledged": "I understand the risks of modifying expert settings",
+          "grid_voltage_low": "Grid Low Voltage Threshold (V)",
+          "grid_voltage_high": "Grid High Voltage Threshold (V)",
+          "grid_frequency_low": "Grid Low Frequency Threshold (Hz)",
+          "grid_frequency_high": "Grid High Frequency Threshold (Hz)",
+          "back_to_menu": "Back to Menu (without saving)",
+          "parallel_mode": "Parallel Mode",
+          "ac_voltage_range": "AC Input Voltage Range",
+          "bms_communication": "BMS Communication",
+          "battery_heater_start_temp": "Battery Heater Start Temperature",
+          "battery_heater_stop_temp": "Battery Heater Stop Temperature",
+          "lithium_activation_current": "Lithium Activation Current",
+          "bms_charge_limit_mode": "BMS Charge Limit Mode",
+          "timed_charge_enable": "Timed Charging Enable",
+          "timed_discharge_enable": "Timed Discharging Enable",
+          "leakage_current_detection": "Leakage Current Detection",
+          "password_set": "Password Protection",
+          "neutral_ground_short": "Neutral-Ground Bond",
+          "power_saving_mode": "Power Saving Mode",
+          "auto_restart_overload": "Auto Restart on Overload",
+          "auto_restart_over_temp": "Auto Restart on Over-Temperature",
+          "bypass_on_overload": "Bypass on Overload",
+          "bms_fault_stop": "BMS Fault Stop",
+          "dc_load_switch": "DC Load Control",
+          "derate_power": "Derate Power",
+          "bms_protocol": "BMS Protocol",
+          "max_grid_current": "Max Grid Input Current",
+          "max_grid_power": "Max Grid Power",
+          "output_phase_wiring": "Output Wiring Type",
+          "generator_work_mode": "Generator Work Mode",
+          "generator_charge_current": "Generator Charge Current",
+          "generator_rated_power": "Generator Rated Power",
+          "grid_uv_level1": "Grid Under-Voltage Level 1",
+          "grid_uv_time1": "Grid UV Level 1 Delay",
+          "grid_uv_resume_level1": "Grid UV Level 1 Recovery",
+          "grid_uv_resume_time1": "Grid UV Level 1 Recovery Delay",
+          "grid_uv_level2": "Grid Under-Voltage Level 2",
+          "grid_uv_time2": "Grid UV Level 2 Delay",
+          "grid_uv_resume_level2": "Grid UV Level 2 Recovery",
+          "grid_uv_resume_time2": "Grid UV Level 2 Recovery Delay",
+          "grid_ov_level1": "Grid Over-Voltage Level 1",
+          "grid_ov_time1": "Grid OV Level 1 Delay",
+          "grid_ov_resume_level1": "Grid OV Level 1 Recovery",
+          "grid_ov_resume_time1": "Grid OV Level 1 Recovery Delay",
+          "grid_ov_level2": "Grid Over-Voltage Level 2",
+          "grid_ov_time2": "Grid OV Level 2 Delay",
+          "grid_ov_resume_level2": "Grid OV Level 2 Recovery",
+          "grid_ov_resume_time2": "Grid OV Level 2 Recovery Delay",
+          "grid_uf_level1": "Grid Under-Frequency Level 1",
+          "grid_uf_time1": "Grid UF Level 1 Delay",
+          "grid_uf_resume_level1": "Grid UF Level 1 Recovery",
+          "grid_uf_resume_time1": "Grid UF Level 1 Recovery Delay",
+          "grid_uf_level2": "Grid Under-Frequency Level 2",
+          "grid_uf_time2": "Grid UF Level 2 Delay",
+          "grid_uf_resume_level2": "Grid UF Level 2 Recovery",
+          "grid_uf_resume_time2": "Grid UF Level 2 Recovery Delay",
+          "grid_of_level1": "Grid Over-Frequency Level 1",
+          "grid_of_time1": "Grid OF Level 1 Delay",
+          "grid_of_resume_level1": "Grid OF Level 1 Recovery",
+          "grid_of_resume_time1": "Grid OF Level 1 Recovery Delay",
+          "grid_of_level2": "Grid Over-Frequency Level 2",
+          "grid_of_time2": "Grid OF Level 2 Delay",
+          "grid_of_resume_level2": "Grid OF Level 2 Recovery",
+          "grid_of_resume_time2": "Grid OF Level 2 Recovery Delay",
+          "ct_ratio": "CT Ratio",
+          "reconnect_power_ramp": "Reconnect Power Ramp",
+          "watt_pf_curve_enable": "Watt-PF Curve",
+          "afci_enable": "AFCI Enable",
+          "normal_connect_delay": "Normal Connection Delay",
+          "normal_connect_power_ramp": "Normal Connection Ramp",
+          "grid_reconnect_time": "Grid Reconnect Delay",
+          "isolation_check_enable": "Insulation Check Enable",
+          "isolation_protect_threshold": "Insulation Threshold",
+          "grid_function_enable": "Grid Function Enable",
+          "grid_standard_user_mode": "Grid Standard Mode",
+          "energy_priority": "Output Priority"
+        },
+        "data_description": {
+          "expert_mode_acknowledged": "⚠️ REQUIRED: You must acknowledge that you understand the risks before modifying expert settings. Incorrect configuration can damage equipment, void warranties, and create safety hazards.",
+          "grid_voltage_low": "⚠️ CRITICAL: Grid voltage below this threshold triggers disconnect. Must comply with local electrical codes. Typical: 170-190V for 230V systems, 90-105V for 120V systems. Setting too low risks equipment damage.",
+          "grid_voltage_high": "⚠️ CRITICAL: Grid voltage above this threshold triggers disconnect. Must comply with local electrical codes. Typical: 250-280V for 230V systems, 130-140V for 120V systems. Setting too high risks equipment damage.",
+          "grid_frequency_low": "⚠️ CRITICAL: Grid frequency below this threshold triggers disconnect. Must comply with grid codes. Typical: 49.5Hz for 50Hz regions, 59.5Hz for 60Hz regions. Incorrect setting can damage motors and electronics.",
+          "grid_frequency_high": "⚠️ CRITICAL: Grid frequency above this threshold triggers disconnect. Must comply with grid codes. Typical: 50.5Hz for 50Hz regions, 60.5Hz for 60Hz regions. Incorrect setting can damage motors and electronics.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page.",
+          "parallel_mode": "Configuration for multi-inverter parallel operation",
+          "ac_voltage_range": "Choose tolerance for grid voltage fluctuations",
+          "bms_communication": "Enable communication with external Battery Management System",
+          "battery_heater_start_temp": "Turn on battery heater when temperature drops below this",
+          "battery_heater_stop_temp": "Turn off battery heater when temperature rises above this",
+          "lithium_activation_current": "Current for activating deeply discharged lithium batteries",
+          "bms_charge_limit_mode": "How BMS controls charging current",
+          "timed_charge_enable": "Enable scheduled charging windows",
+          "timed_discharge_enable": "Enable scheduled discharging windows",
+          "leakage_current_detection": "Enable ground fault/leakage detection",
+          "password_set": "Set 4-digit password for settings protection",
+          "neutral_ground_short": "Enable N-PE ground bonding (specific models only)",
+          "power_saving_mode": "Reduce standby power consumption",
+          "auto_restart_overload": "Automatically retry after overload shutdown",
+          "auto_restart_over_temp": "Automatically retry after temperature shutdown",
+          "bypass_on_overload": "Switch to grid when inverter overloaded",
+          "bms_fault_stop": "Shut down if BMS communication fails",
+          "dc_load_switch": "Enable DC output for direct DC loads",
+          "derate_power": "Reduce maximum inverter power output",
+          "bms_protocol": "Select BMS communication protocol type",
+          "max_grid_current": "Limit current draw from grid",
+          "max_grid_power": "Peak clipping power from grid",
+          "output_phase_wiring": "Configure output wiring topology",
+          "generator_work_mode": "Configure generator input behavior",
+          "generator_charge_current": "Maximum current when charging from generator",
+          "generator_rated_power": "Generator power rating in watts",
+          "grid_uv_level1": "Disconnect when grid voltage drops below this (Level 1)",
+          "grid_uv_time1": "Milliseconds to wait before disconnecting on UV Level 1",
+          "grid_uv_resume_level1": "Voltage to resume after under-voltage fault",
+          "grid_uv_resume_time1": "Delay before reconnecting after UV recovery",
+          "grid_uv_level2": "Second UV protection level (more severe)",
+          "grid_uv_time2": "Delay for UV Level 2 protection",
+          "grid_uv_resume_level2": "Voltage to resume after Level 2 UV fault",
+          "grid_uv_resume_time2": "Delay before reconnecting after UV Level 2 recovery",
+          "grid_ov_level1": "Disconnect when grid voltage exceeds this (Level 1)",
+          "grid_ov_time1": "Delay before disconnecting on OV Level 1",
+          "grid_ov_resume_level1": "Voltage to resume after over-voltage fault",
+          "grid_ov_resume_time1": "Delay before reconnecting after OV recovery",
+          "grid_ov_level2": "Second OV protection level (more severe)",
+          "grid_ov_time2": "Delay for OV Level 2 protection",
+          "grid_ov_resume_level2": "Voltage to resume after Level 2 OV fault",
+          "grid_ov_resume_time2": "Delay before reconnecting after OV Level 2 recovery",
+          "grid_uf_level1": "Disconnect when grid frequency drops below this",
+          "grid_uf_time1": "Delay before disconnecting on UF Level 1",
+          "grid_uf_resume_level1": "Frequency to resume after under-frequency fault",
+          "grid_uf_resume_time1": "Delay before reconnecting after UF recovery",
+          "grid_uf_level2": "Second UF protection level",
+          "grid_uf_time2": "Delay for UF Level 2 protection",
+          "grid_uf_resume_level2": "Frequency to resume after Level 2 UF fault",
+          "grid_uf_resume_time2": "Delay before reconnecting after UF Level 2 recovery",
+          "grid_of_level1": "Disconnect when grid frequency exceeds this",
+          "grid_of_time1": "Delay before disconnecting on OF Level 1",
+          "grid_of_resume_level1": "Frequency to resume after over-frequency fault",
+          "grid_of_resume_time1": "Delay before reconnecting after OF recovery",
+          "grid_of_level2": "Second OF protection level",
+          "grid_of_time2": "Delay for OF Level 2 protection",
+          "grid_of_resume_level2": "Frequency to resume after Level 2 OF fault",
+          "grid_of_resume_time2": "Delay before reconnecting after OF Level 2 recovery",
+          "ct_ratio": "Current transformer ratio for accurate power measurement",
+          "reconnect_power_ramp": "Seconds to ramp to full power after grid reconnect",
+          "watt_pf_curve_enable": "Vary power factor based on output power",
+          "afci_enable": "Arc fault detection (NEC requirement in US)",
+          "normal_connect_delay": "Seconds to wait before grid connection",
+          "normal_connect_power_ramp": "Seconds to ramp to full power on connection",
+          "grid_reconnect_time": "Seconds to wait before reconnecting after grid fault",
+          "isolation_check_enable": "Enable ground fault/insulation monitoring",
+          "isolation_protect_threshold": "Minimum insulation resistance (kilo-ohms)",
+          "grid_function_enable": "Bitfield for enabling various grid functions",
+          "grid_standard_user_mode": "User vs factory grid standard mode",
+          "energy_priority": "Energy source priority for powering loads"
+        }
+      },
+      "features": {
+        "title": "Enable/Disable Features",
+        "description": "Control which sensors and entities are enabled in Home Assistant. Disabling unused features reduces entity count and improves performance.",
+        "data": {
+          "enable_configurable_numbers": "Enable Configurable Number Entities",
+          "enable_configurable_selects": "Enable Configurable Select Entities",
+          "enable_diagnostic_sensors": "Enable Diagnostic Sensors",
+          "enable_calculated_sensors": "Enable Calculated Sensors",
+          "enable_energy_dashboard": "Enable Energy Dashboard Integration",
+          "back_to_menu": "Back to Menu (without saving)"
+        },
+        "data_description": {
+          "enable_configurable_numbers": "Enable Number entities for runtime configuration of inverter settings (charge currents, SOC thresholds, voltages, etc.). These entities allow you to modify inverter parameters directly from Home Assistant. ⚠️ Changes are written directly to the inverter.",
+          "enable_configurable_selects": "Enable Select entities for runtime configuration of inverter modes (output priority, charge source priority, battery type, etc.). These entities allow you to change operational modes from Home Assistant. ⚠️ Changes are written directly to the inverter.",
+          "enable_diagnostic_sensors": "Enable diagnostic sensors that track integration health: BLE RSSI, connection status, update duration, failed reads, CRC errors, and retry statistics. Useful for troubleshooting connection and performance issues.",
+          "enable_calculated_sensors": "Enable calculated sensors that derive useful metrics: system efficiency, grid dependency, self-sufficiency ratio, PV utilization, battery contribution, and energy flow analysis. These provide insights beyond raw register data.",
+          "enable_energy_dashboard": "Enable integration with Home Assistant's Energy Dashboard. Provides energy sensors in the correct format for tracking solar production, battery charge/discharge, grid import/export, and load consumption over time.",
+          "back_to_menu": "Return to the main menu without saving any changes made on this page."
+        }
+      },
+      "presets": {
+        "title": "Configuration Presets",
+        "description": "Apply pre-configured settings optimized for common use cases. These presets will modify multiple settings at once.",
+        "data": {
+          "preset": "Select Configuration Preset",
+          "confirm_preset": "I understand this will modify multiple settings"
+        },
+        "menu_options": {
+          "off_grid_solar": "Off-Grid Solar System",
+          "grid_tied_solar": "Grid-Tied Solar System",
+          "ups_mode": "UPS Mode",
+          "time_of_use": "Time-of-Use Optimization"
+        },
+        "preset_descriptions": {
+          "off_grid_solar": "Optimized for standalone solar and battery systems with no grid connection. Prioritizes solar and battery power. Disables AC charging. Use when: Operating fully off-grid with solar as primary power source.",
+          "grid_tied_solar": "Optimized for grid-connected systems with solar priority. Uses solar first, grid as backup. Maintains battery health with smart charging. Use when: Connected to grid but want to maximize solar usage and reduce electricity bills.",
+          "ups_mode": "Optimized for uninterruptible power supply applications. Grid power primary, battery backup for outages. Fast switching, narrow AC input range for clean power. Use when: Protecting sensitive equipment from power outages and requiring seamless transition.",
+          "time_of_use": "Optimized for Time-of-Use electricity rates. Charges battery during off-peak hours, discharges during peak hours. Maximizes cost savings. Use when: Utility has time-based pricing and you want to minimize electricity costs."
+        }
+      },
+      "pv_settings": {
+        "data": {
+          "pv_power_balance": "PV Power Priority",
+          "charge_source_priority": "Charge Source Priority"
+        },
+        "data_description": {
+          "pv_power_balance": "Choose where solar power goes first",
+          "charge_source_priority": "Choose which energy source charges the battery first"
+        }
+      }
+    },
+    "error": {
+      "invalid_voltage": "Battery voltage must be 12V, 24V, 36V, or 48V",
+      "invalid_range": "Value must be between {min} and {max}",
+      "invalid_frequency": "Frequency must be either 50Hz or 60Hz",
+      "relationship_violation": "{entity1} cannot exceed {entity2}",
+      "soc_order_violation": "SOC thresholds must be in order: Discharge Stop < Low Alarm <= Switch to AC < Switch to Battery",
+      "current_exceeds_capacity": "Charge current exceeds safe rate for battery capacity (should be <= {max_safe}A)",
+      "connection_failed": "Failed to connect to inverter. Check Bluetooth connection and ensure inverter is powered on.",
+      "write_failed": "Failed to write setting to inverter: {error}",
+      "verification_failed": "Setting was written but verification failed. Wrote {written}, read back {read}",
+      "battery_chemistry_mismatch": "Selected battery type is incompatible with configured voltage thresholds",
+      "voltage_too_high": "Voltage setting is dangerously high for selected battery type",
+      "voltage_too_low": "Voltage setting may cause battery damage or incomplete charging",
+      "expert_mode_required": "You must acknowledge the expert mode warning before modifying these settings",
+      "preset_conflict": "Cannot apply preset: one or more settings conflict with current configuration"
+    },
+    "abort": {
+      "already_configured": "This device is already configured",
+      "invalid_auth": "Invalid authentication",
+      "user_cancelled": "Configuration cancelled by user",
+      "write_timeout": "Inverter did not respond to configuration command within timeout period"
+    }
+  },
+  "selector": {
+    "output_priority": {
+      "options": {
+        "solar_first": "Solar First - Use solar power first, grid/AC as backup",
+        "mains_first": "Mains First - Use grid power first, solar/battery as backup",
+        "sbu": "SBU (Solar-Battery-Utility) - Prioritize in order: Solar → Battery → Grid"
+      }
+    },
+    "charge_source_priority": {
+      "options": {
+        "pv_priority": "PV Priority - Solar charges first, AC charges as backup",
+        "ac_priority": "AC Priority - Grid charges first, solar charges as backup",
+        "hybrid": "Hybrid Mode - Both sources charge simultaneously (PV prioritized)",
+        "pv_only": "PV Only - Only solar charges battery (no AC charging)"
+      }
+    },
+    "battery_type": {
+      "options": {
+        "user_defined": "User Defined - Custom voltage settings",
+        "sealed_lead_acid": "Sealed Lead Acid (AGM/VRLA)",
+        "flooded_lead_acid": "Flooded Lead Acid (FLA)",
+        "gel": "GEL Battery",
+        "lifepo4_14s": "LiFePO4 14S (44.8V nominal)",
+        "lifepo4_15s": "LiFePO4 15S (48V nominal)",
+        "lifepo4_16s": "LiFePO4 16S (51.2V nominal)",
+        "lifepo4_7s": "LiFePO4 7S (22.4V nominal)",
+        "lifepo4_8s": "LiFePO4 8S (25.6V nominal)",
+        "lifepo4_9s": "LiFePO4 9S (28.8V nominal)",
+        "ternary_lithium_7s": "Ternary Lithium 7S (25.9V nominal)",
+        "ternary_lithium_8s": "Ternary Lithium 8S (29.6V nominal)",
+        "ternary_lithium_13s": "Ternary Lithium 13S (48.1V nominal)",
+        "ternary_lithium_14s": "Ternary Lithium 14S (51.8V nominal)",
+        "user_lithium": "User-Defined Lithium - Custom lithium battery settings"
+      }
+    },
+    "ac_input_range": {
+      "options": {
+        "appliance": "Appliance Mode - Wide voltage range (90-280V), compatible with generators",
+        "ups": "UPS Mode - Narrow voltage range (170-280V), clean power for sensitive equipment"
+      }
+    },
+    "parallel_mode": {
+      "options": {
+        "standalone": "Standalone - Single inverter operation",
+        "parallel": "Parallel - Multiple inverters synchronized",
+        "three_phase": "Three-Phase - Three inverters for 3-phase output"
+      }
+    },
+    "bms_protocol": {
+      "options": {
+        "none": "None - No BMS communication",
+        "pylontech": "Pylontech",
+        "sol_ark": "Sol-Ark",
+        "pace": "PACE",
+        "lifepo4": "Generic LiFePO4"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_soc": {
+        "name": "Battery SOC"
+      },
+      "pv_power": {
+        "name": "PV Power"
+      },
+      "grid_power": {
+        "name": "Grid Power"
+      },
+      "load_power": {
+        "name": "Load Power"
+      },
+      "battery_voltage": {
+        "name": "Battery Voltage"
+      },
+      "battery_current": {
+        "name": "Battery Current"
+      },
+      "inverter_temperature": {
+        "name": "Inverter Temperature"
+      },
+      "battery_temperature": {
+        "name": "Battery Temperature"
+      },
+      "pv_energy_today": {
+        "name": "PV Energy Today"
+      },
+      "load_energy_today": {
+        "name": "Load Energy Today"
+      },
+      "pv_energy_total": {
+        "name": "PV Energy Total"
+      },
+      "load_energy_total": {
+        "name": "Load Energy Total"
+      },
+      "battery_charge_ah_today": {
+        "name": "Battery Charge AH Today"
+      },
+      "battery_discharge_ah_today": {
+        "name": "Battery Discharge AH Today"
+      },
+      "work_days_total": {
+        "name": "Work Days Total"
+      },
+      "charge_state": {
+        "name": "Charge State"
+      },
+      "grid_voltage": {
+        "name": "Grid Voltage"
+      },
+      "grid_frequency": {
+        "name": "Grid Frequency"
+      },
+      "inverter_voltage": {
+        "name": "Inverter Voltage"
+      },
+      "inverter_frequency": {
+        "name": "Inverter Frequency"
+      },
+      "ac_charge_current": {
+        "name": "AC Charge Current"
+      },
+      "pv_charge_current": {
+        "name": "PV Charge Current"
+      },
+      "load_ratio": {
+        "name": "Load Ratio"
+      },
+      "self_sufficiency": {
+        "name": "Self Sufficiency"
+      },
+      "grid_dependency": {
+        "name": "Grid Dependency"
+      },
+      "battery_power": {
+        "name": "Battery Power"
+      },
+      "system_efficiency": {
+        "name": "System Efficiency"
+      },
+      "ble_connection_quality": {
+        "name": "BLE Connection Quality"
+      },
+      "last_update": {
+        "name": "Last Update"
+      },
+      "update_duration": {
+        "name": "Update Duration"
+      },
+      "failed_reads_count": {
+        "name": "Failed Reads Count"
+      },
+      "success_rate": {
+        "name": "Success Rate"
+      }
+    },
+    "switch": {
+      "ac_power": {
+        "name": "AC Power"
+      }
+    },
+    "select": {
+      "energy_priority": {
+        "name": "Energy Priority",
+        "state": {
+          "solar_first": "Solar First",
+          "utility_first": "Utility First",
+          "battery_first": "Battery First"
+        }
+      }
+    },
+    "binary_sensor": {
+      "fault_detected": {
+        "name": "Fault Detected"
+      }
+    }
+  },
+  "services": {
+    "force_refresh": {
+      "name": "Force Refresh",
+      "description": "Force an immediate data refresh from the inverter"
+    },
+    "reset_statistics": {
+      "name": "Reset Statistics",
+      "description": "Reset diagnostic statistics counters"
+    }
+  }
+}

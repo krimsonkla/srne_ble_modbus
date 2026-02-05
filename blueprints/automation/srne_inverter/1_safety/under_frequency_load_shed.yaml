@@ -1,0 +1,586 @@
+blueprint:
+  name: "SRNE Inverter - Under-Frequency Load Shedding"
+  description: >
+    Automatic load shedding system that protects the inverter and prevents system collapse when
+    grid frequency drops below safe thresholds. Implements priority-based load shedding with
+    configurable frequency thresholds and automatic restoration when frequency normalizes.
+    Essential for off-grid systems and weak grid connections.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/1_safety/under_frequency_load_shed.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    grid_frequency_sensor:
+      name: Grid Frequency Sensor
+      description: Sensor monitoring grid/inverter frequency
+      selector:
+        entity:
+          domain: sensor
+
+    load_power_sensor:
+      name: Load Power Sensor
+      description: Current total load power sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    # Priority-based load switches
+    priority_1_load:
+      name: Priority 1 Load (Lowest - Shed First)
+      description: First load to shed (e.g., pool pump, water heater)
+      selector:
+        entity:
+          domain: switch
+
+    priority_1_power:
+      name: Priority 1 Load Power
+      description: Approximate power consumption (watts)
+      default: 2000
+      selector:
+        number:
+          min: 100
+          max: 10000
+          step: 100
+          unit_of_measurement: "W"
+
+    enable_priority_2:
+      name: Enable Priority 2 Load
+      description: Use a second load for shedding
+      default: false
+      selector:
+        boolean:
+
+    priority_2_load:
+      name: Priority 2 Load (Optional)
+      description: Second load to shed
+      default: {}
+      selector:
+        entity:
+          domain: switch
+
+    priority_2_power:
+      name: Priority 2 Load Power
+      description: Approximate power consumption (watts)
+      default: 1500
+      selector:
+        number:
+          min: 100
+          max: 10000
+          step: 100
+          unit_of_measurement: "W"
+
+    enable_priority_3:
+      name: Enable Priority 3 Load
+      description: Use a third load for shedding
+      default: false
+      selector:
+        boolean:
+
+    priority_3_load:
+      name: Priority 3 Load (Optional)
+      description: Third load to shed
+      default: {}
+      selector:
+        entity:
+          domain: switch
+
+    priority_3_power:
+      name: Priority 3 Load Power
+      description: Approximate power consumption (watts)
+      default: 1000
+      selector:
+        number:
+          min: 100
+          max: 10000
+          step: 100
+          unit_of_measurement: "W"
+
+    enable_priority_4:
+      name: Enable Priority 4 Load
+      description: Use a fourth load for shedding
+      default: false
+      selector:
+        boolean:
+
+    priority_4_load:
+      name: Priority 4 Load (Highest - Shed Last)
+      description: Fourth load to shed (critical loads)
+      default: {}
+      selector:
+        entity:
+          domain: switch
+
+    priority_4_power:
+      name: Priority 4 Load Power
+      description: Approximate power consumption (watts)
+      default: 500
+      selector:
+        number:
+          min: 100
+          max: 10000
+          step: 100
+          unit_of_measurement: "W"
+
+    # Frequency thresholds
+    nominal_frequency:
+      name: Nominal Frequency
+      description: Normal operating frequency (Hz)
+      default: 50.0
+      selector:
+        number:
+          min: 49.0
+          max: 51.0
+          step: 0.1
+          unit_of_measurement: "Hz"
+          mode: slider
+
+    ufls_stage_1:
+      name: UFLS Stage 1 Frequency
+      description: First load shedding stage threshold (Hz)
+      default: 49.5
+      selector:
+        number:
+          min: 48.5
+          max: 50.0
+          step: 0.1
+          unit_of_measurement: "Hz"
+          mode: slider
+
+    ufls_stage_2:
+      name: UFLS Stage 2 Frequency
+      description: Second load shedding stage threshold (Hz)
+      default: 49.0
+      selector:
+        number:
+          min: 48.0
+          max: 49.5
+          step: 0.1
+          unit_of_measurement: "Hz"
+          mode: slider
+
+    ufls_stage_3:
+      name: UFLS Stage 3 Frequency
+      description: Third load shedding stage threshold (Hz)
+      default: 48.5
+      selector:
+        number:
+          min: 47.5
+          max: 49.0
+          step: 0.1
+          unit_of_measurement: "Hz"
+          mode: slider
+
+    ufls_stage_4:
+      name: UFLS Stage 4 Frequency
+      description: Fourth load shedding stage threshold (Hz)
+      default: 48.0
+      selector:
+        number:
+          min: 47.0
+          max: 48.5
+          step: 0.1
+          unit_of_measurement: "Hz"
+          mode: slider
+
+    # Timing settings
+    shed_delay:
+      name: Load Shedding Delay
+      description: Frequency must be low for this duration before shedding (seconds)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: "s"
+
+    restore_hysteresis:
+      name: Restoration Frequency Hysteresis
+      description: How much above threshold before restoring loads (Hz)
+      default: 0.3
+      selector:
+        number:
+          min: 0.1
+          max: 1.0
+          step: 0.1
+          unit_of_measurement: "Hz"
+          mode: slider
+
+    restore_delay:
+      name: Load Restoration Delay
+      description: Frequency must be stable for this duration before restoring (seconds)
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 120
+          step: 10
+          unit_of_measurement: "s"
+
+    sequential_restore:
+      name: Sequential Load Restoration
+      description: Restore loads one at a time to prevent inrush
+      default: true
+      selector:
+        boolean:
+
+    restore_interval:
+      name: Load Restore Interval
+      description: Wait between restoring loads (seconds)
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 60
+          step: 5
+          unit_of_measurement: "s"
+
+    # Emergency settings
+    enable_emergency_mode:
+      name: Enable Emergency Mode
+      description: Switch to safe priority mode during load shedding
+      default: true
+      selector:
+        boolean:
+
+    emergency_priority:
+      name: Emergency Priority Mode
+      description: Priority to switch to during frequency events
+      default: "Battery First"
+      selector:
+        select:
+          options:
+            - "Battery First"
+            - "Utility First"
+            - "Solar First"
+
+    # Notifications
+    notification_service:
+      name: Notification Service
+      description: Service for load shedding notifications
+      default: ""
+      selector:
+        text:
+
+    notify_on_shed:
+      name: Notify on Load Shed
+      description: Send notification when loads are shed
+      default: true
+      selector:
+        boolean:
+
+    notify_on_restore:
+      name: Notify on Restore
+      description: Send notification when loads are restored
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # Frequency monitoring triggers
+  - platform: numeric_state
+    entity_id: !input grid_frequency_sensor
+    below: !input ufls_stage_1
+    for:
+      seconds: !input shed_delay
+    id: "freq_stage_1"
+
+  - platform: numeric_state
+    entity_id: !input grid_frequency_sensor
+    below: !input ufls_stage_2
+    for:
+      seconds: !input shed_delay
+    id: "freq_stage_2"
+
+  - platform: numeric_state
+    entity_id: !input grid_frequency_sensor
+    below: !input ufls_stage_3
+    for:
+      seconds: !input shed_delay
+    id: "freq_stage_3"
+
+  - platform: numeric_state
+    entity_id: !input grid_frequency_sensor
+    below: !input ufls_stage_4
+    for:
+      seconds: !input shed_delay
+    id: "freq_stage_4"
+
+  # Frequency restoration trigger
+  - platform: numeric_state
+    entity_id: !input grid_frequency_sensor
+    above: !input nominal_frequency
+    for:
+      seconds: !input restore_delay
+    id: "freq_restored"
+
+  # Periodic check
+  - platform: time_pattern
+    minutes: "/5"
+    id: "periodic_check"
+
+condition: []
+
+action:
+  - variables:
+      frequency: "{{ states(grid_frequency_sensor) | float(50.0) }}"
+      load_power: "{{ states(load_power_sensor) | float(0) }}"
+      nominal: !input nominal_frequency
+      stage_1: !input ufls_stage_1
+      stage_2: !input ufls_stage_2
+      stage_3: !input ufls_stage_3
+      stage_4: !input ufls_stage_4
+      hysteresis: !input restore_hysteresis
+      enable_p2: !input enable_priority_2
+      enable_p3: !input enable_priority_3
+      enable_p4: !input enable_priority_4
+      enable_emergency: !input enable_emergency_mode
+
+  # Get current load states
+  - variables:
+      p1_state: "{{ states(priority_1_load) }}"
+      p2_state: >
+        {% if enable_p2 and priority_2_load is defined and priority_2_load != none %}
+          {{ states(priority_2_load) }}
+        {% else %}
+          unavailable
+        {% endif %}
+      p3_state: >
+        {% if enable_p3 and priority_3_load is defined and priority_3_load != none %}
+          {{ states(priority_3_load) }}
+        {% else %}
+          unavailable
+        {% endif %}
+      p4_state: >
+        {% if enable_p4 and priority_4_load is defined and priority_4_load != none %}
+          {{ states(priority_4_load) }}
+        {% else %}
+          unavailable
+        {% endif %}
+
+  # Determine current UFLS stage
+  - variables:
+      current_stage: >
+        {% if frequency < stage_4 %}
+          4
+        {% elif frequency < stage_3 %}
+          3
+        {% elif frequency < stage_2 %}
+          2
+        {% elif frequency < stage_1 %}
+          1
+        {% else %}
+          0
+        {% endif %}
+
+      restore_threshold: "{{ nominal - hysteresis }}"
+      can_restore: "{{ frequency > restore_threshold }}"
+
+  # Execute appropriate action
+  - choose:
+      # LOAD SHEDDING - Sequential shedding based on stage
+      - conditions:
+          - condition: template
+            value_template: "{{ current_stage > 0 }}"
+        sequence:
+          # Switch to emergency mode if enabled
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_emergency }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input priority_select
+                    data:
+                      option: !input emergency_priority
+
+          # Shed loads based on stage
+          - choose:
+              # Stage 4 - Shed all loads
+              - conditions:
+                  - condition: template
+                    value_template: "{{ current_stage >= 4 and enable_p4 and p4_state == 'on' }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input priority_4_load
+                  - service: system_log.write
+                    data:
+                      message: "UFLS Stage 4: Shed priority 4 load ({{ frequency }}Hz)"
+                      level: critical
+                      logger: homeassistant.components.srne_ble_modbus.ufls
+
+          - choose:
+              # Stage 3 or higher
+              - conditions:
+                  - condition: template
+                    value_template: "{{ current_stage >= 3 and enable_p3 and p3_state == 'on' }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input priority_3_load
+                  - service: system_log.write
+                    data:
+                      message: "UFLS Stage 3: Shed priority 3 load ({{ frequency }}Hz)"
+                      level: error
+                      logger: homeassistant.components.srne_ble_modbus.ufls
+
+          - choose:
+              # Stage 2 or higher
+              - conditions:
+                  - condition: template
+                    value_template: "{{ current_stage >= 2 and enable_p2 and p2_state == 'on' }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input priority_2_load
+                  - service: system_log.write
+                    data:
+                      message: "UFLS Stage 2: Shed priority 2 load ({{ frequency }}Hz)"
+                      level: warning
+                      logger: homeassistant.components.srne_ble_modbus.ufls
+
+          - choose:
+              # Stage 1 or higher
+              - conditions:
+                  - condition: template
+                    value_template: "{{ current_stage >= 1 and p1_state == 'on' }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input priority_1_load
+                  - service: system_log.write
+                    data:
+                      message: "UFLS Stage 1: Shed priority 1 load ({{ frequency }}Hz)"
+                      level: warning
+                      logger: homeassistant.components.srne_ble_modbus.ufls
+
+          # Notification for load shedding
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_shed and notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "⚠️ Under-Frequency Load Shedding"
+                      message: >
+                        Load shedding activated - Stage {{ current_stage }}
+
+                        Frequency: {{ frequency }}Hz (Normal: {{ nominal }}Hz)
+                        Load Power: {{ load_power | round(0) }}W
+
+                        Loads shed to protect system stability.
+                      data:
+                        tag: "srne_ufls"
+                        priority: high
+
+      # LOAD RESTORATION - Sequential restoration when frequency normalizes
+      - conditions:
+          - condition: template
+            value_template: "{{ can_restore }}"
+          - condition: or
+            conditions:
+              - condition: template
+                value_template: "{{ p1_state == 'off' }}"
+              - condition: template
+                value_template: "{{ enable_p2 and p2_state == 'off' }}"
+              - condition: template
+                value_template: "{{ enable_p3 and p3_state == 'off' }}"
+              - condition: template
+                value_template: "{{ enable_p4 and p4_state == 'off' }}"
+        sequence:
+          - service: system_log.write
+            data:
+              message: "UFLS: Restoring loads ({{ frequency }}Hz > {{ restore_threshold }}Hz)"
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.ufls
+
+          # Restore loads in reverse order (highest priority first)
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_p4 and p4_state == 'off' }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input priority_4_load
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ sequential_restore }}"
+                        sequence:
+                          - delay:
+                              seconds: !input restore_interval
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_p3 and p3_state == 'off' }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input priority_3_load
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ sequential_restore }}"
+                        sequence:
+                          - delay:
+                              seconds: !input restore_interval
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_p2 and p2_state == 'off' }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input priority_2_load
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ sequential_restore }}"
+                        sequence:
+                          - delay:
+                              seconds: !input restore_interval
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ p1_state == 'off' }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input priority_1_load
+
+          # Notification for restoration
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_restore and notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "✅ Loads Restored"
+                      message: >
+                        Frequency normalized - loads restored
+
+                        Frequency: {{ frequency }}Hz
+                        Load Power: {{ load_power | round(0) }}W
+
+                        All loads operational.
+                      data:
+                        tag: "srne_ufls"
+
+mode: queued
+max: 5

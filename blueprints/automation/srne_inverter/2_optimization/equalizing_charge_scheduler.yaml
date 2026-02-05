@@ -1,0 +1,502 @@
+blueprint:
+  name: "SRNE Inverter - Equalizing Charge Scheduler"
+  description: >
+    Schedules periodic equalization charges for lead-acid, flooded, and GEL batteries to maintain
+    battery health and balance cell voltages. Automatically enables equalization mode at configured
+    intervals with proper voltage and duration settings. Includes battery type validation to prevent
+    damage to lithium batteries.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/2_optimization/equalizing_charge_scheduler.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    equalization_enable_switch:
+      name: Equalization Enable Switch
+      description: Switch to enable/disable equalization charging
+      selector:
+        entity:
+          domain: switch
+
+    battery_type_sensor:
+      name: Battery Type Sensor (Optional)
+      description: Sensor showing battery type for safety verification
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    battery_voltage_sensor:
+      name: Battery Voltage Sensor
+      description: Battery voltage sensor for monitoring
+      selector:
+        entity:
+          domain: sensor
+          device_class: voltage
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    battery_temp_sensor:
+      name: Battery Temperature Sensor
+      description: Battery temperature sensor for safety checks
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    priority_select:
+      name: Energy Priority Select
+      description: Energy priority select entity
+      selector:
+        entity:
+          domain: select
+
+    # Schedule settings
+    equalization_day:
+      name: Equalization Day of Week
+      description: Day to perform equalization (1=Monday, 7=Sunday)
+      default: 7
+      selector:
+        number:
+          min: 1
+          max: 7
+          step: 1
+          mode: slider
+
+    equalization_time:
+      name: Equalization Start Time
+      description: Time to start equalization charge
+      default: "10:00:00"
+      selector:
+        time:
+
+    equalization_frequency:
+      name: Equalization Frequency
+      description: How often to perform equalization
+      default: "Weekly"
+      selector:
+        select:
+          options:
+            - "Weekly"
+            - "Bi-weekly"
+            - "Monthly"
+            - "Manual Only"
+
+    # Battery settings
+    battery_type:
+      name: Battery Type
+      description: Type of battery (must NOT be lithium)
+      default: "Flooded"
+      selector:
+        select:
+          options:
+            - "Flooded"
+            - "AGM"
+            - "GEL"
+            - "Other Lead-Acid"
+
+    equalization_duration:
+      name: Equalization Duration
+      description: Duration of equalization charge (hours)
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 6
+          step: 0.5
+          unit_of_measurement: "hours"
+          mode: slider
+
+    # Safety thresholds
+    min_soc_requirement:
+      name: Minimum SOC Requirement
+      description: Only perform equalization if SOC is above this (%)
+      default: 90
+      selector:
+        number:
+          min: 80
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+
+    max_temperature:
+      name: Maximum Temperature
+      description: Skip equalization if temperature exceeds this (°C)
+      default: 40
+      selector:
+        number:
+          min: 30
+          max: 50
+          step: 1
+          unit_of_measurement: "°C"
+
+    min_temperature:
+      name: Minimum Temperature
+      description: Skip equalization if temperature is below this (°C)
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          unit_of_measurement: "°C"
+
+    # Pre-charge settings
+    enable_pre_charge:
+      name: Enable Pre-Charge Phase
+      description: Ensure battery is fully charged before equalization
+      default: true
+      selector:
+        boolean:
+
+    pre_charge_priority:
+      name: Pre-Charge Priority Mode
+      description: Priority mode for charging before equalization
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Utility First"
+            - "Solar First"
+
+    pre_charge_duration:
+      name: Pre-Charge Duration
+      description: Duration of pre-charge phase (hours)
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 6
+          step: 0.5
+          unit_of_measurement: "hours"
+
+    # Post-equalization settings
+    post_equalization_priority:
+      name: Post-Equalization Priority
+      description: Priority mode after equalization completes
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Battery First"
+            - "Utility First"
+
+    enable_completion_notification:
+      name: Enable Completion Notification
+      description: Notify when equalization completes
+      default: true
+      selector:
+        boolean:
+
+    # Notifications
+    notification_service:
+      name: Notification Service
+      description: Service for equalization notifications
+      default: ""
+      selector:
+        text:
+
+    notify_on_start:
+      name: Notify on Start
+      description: Send notification when equalization starts
+      default: true
+      selector:
+        boolean:
+
+    notify_on_skip:
+      name: Notify on Skip
+      description: Send notification when equalization is skipped
+      default: true
+      selector:
+        boolean:
+
+    # Safety options
+    require_manual_confirmation:
+      name: Require Manual Confirmation
+      description: Require input_boolean confirmation before starting (advanced safety)
+      default: false
+      selector:
+        boolean:
+
+    confirmation_boolean:
+      name: Confirmation Boolean (Optional)
+      description: Input boolean that must be on to proceed (if confirmation required)
+      default: {}
+      selector:
+        entity:
+          domain: input_boolean
+
+trigger:
+  # Scheduled trigger
+  - platform: time
+    at: !input equalization_time
+    id: "scheduled"
+
+  # Manual trigger helper
+  - platform: state
+    entity_id: !input equalization_enable_switch
+    to: "on"
+    id: "manual"
+
+condition: []
+
+action:
+  - variables:
+      battery_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      battery_temp: "{{ states(battery_temp_sensor) | float(25) }}"
+      battery_voltage: "{{ states(battery_voltage_sensor) | float(0) }}"
+      current_day: "{{ now().isoweekday() }}"
+      target_day: !input equalization_day
+      frequency: !input equalization_frequency
+      battery_type: !input battery_type
+      min_soc: !input min_soc_requirement
+      max_temp: !input max_temperature
+      min_temp: !input min_temperature
+      require_confirm: !input require_manual_confirmation
+
+  # Check battery type safety
+  - variables:
+      battery_type_check: >
+        {% if battery_type_sensor is defined and battery_type_sensor != none %}
+          {% set detected = states(battery_type_sensor) | lower %}
+          {{ 'lithium' not in detected and 'li-ion' not in detected and 'lifepo4' not in detected }}
+        {% else %}
+          {{ 'lithium' not in battery_type | lower }}
+        {% endif %}
+
+  # Safety validation
+  - variables:
+      safety_checks_passed: >
+        {{ battery_type_check and
+           battery_soc >= min_soc and
+           battery_temp <= max_temp and
+           battery_temp >= min_temp }}
+
+      skip_reason: >
+        {% if not battery_type_check %}
+          Battery type incompatible with equalization (Lithium detected)
+        {% elif battery_soc < min_soc %}
+          Battery SOC too low ({{ battery_soc }}% < {{ min_soc }}%)
+        {% elif battery_temp > max_temp %}
+          Battery temperature too high ({{ battery_temp }}°C > {{ max_temp }}°C)
+        {% elif battery_temp < min_temp %}
+          Battery temperature too low ({{ battery_temp }}°C < {{ min_temp }}°C)
+        {% else %}
+          Unknown
+        {% endif %}
+
+  # Check if scheduled for today (if not manual trigger)
+  - variables:
+      should_run_today: >
+        {% if trigger.id == 'manual' %}
+          true
+        {% elif frequency == 'Manual Only' %}
+          false
+        {% elif frequency == 'Weekly' %}
+          {{ current_day == target_day }}
+        {% elif frequency == 'Bi-weekly' %}
+          {{ current_day == target_day and (now().day // 7) % 2 == 0 }}
+        {% elif frequency == 'Monthly' %}
+          {{ current_day == target_day and now().day <= 7 }}
+        {% else %}
+          false
+        {% endif %}
+
+  # Check manual confirmation if required
+  - variables:
+      confirmation_ok: >
+        {% if require_confirm and confirmation_boolean is defined and confirmation_boolean != none %}
+          {{ states(confirmation_boolean) == 'on' }}
+        {% elif require_confirm %}
+          false
+        {% else %}
+          true
+        {% endif %}
+
+  # Final decision
+  - variables:
+      proceed_with_equalization: >
+        {{ should_run_today and safety_checks_passed and confirmation_ok }}
+
+  # Execute or skip
+  - choose:
+      # Proceed with equalization
+      - conditions:
+          - condition: template
+            value_template: "{{ proceed_with_equalization }}"
+        sequence:
+          # Phase 1: Pre-charge (if enabled)
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_pre_charge }}"
+                  - condition: template
+                    value_template: "{{ battery_soc < 95 }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: !input priority_select
+                    data:
+                      option: !input pre_charge_priority
+
+                  - service: system_log.write
+                    data:
+                      message: >
+                        Equalization: Pre-charge phase started (SOC: {{ battery_soc }}%)
+                      level: info
+                      logger: homeassistant.components.srne_ble_modbus.equalization
+
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ notification_service | length > 0 and notify_on_start }}"
+                        sequence:
+                          - service: !input notification_service
+                            data:
+                              title: "🔋 Equalization Pre-Charge Started"
+                              message: >
+                                Preparing for equalization charge
+
+                                Current SOC: {{ battery_soc }}%
+                                Temperature: {{ battery_temp }}°C
+                                Duration: {{ pre_charge_duration }} hours
+                              data:
+                                tag: "srne_equalization"
+
+                  - delay:
+                      hours: !input pre_charge_duration
+
+          # Phase 2: Enable equalization
+          - service: switch.turn_on
+            target:
+              entity_id: !input equalization_enable_switch
+
+          - service: system_log.write
+            data:
+              message: >
+                Equalization: Equalization phase started
+                Battery: {{ battery_type }}, SOC: {{ battery_soc }}%, Temp: {{ battery_temp }}°C
+                Duration: {{ equalization_duration }} hours
+              level: warning
+              logger: homeassistant.components.srne_ble_modbus.equalization
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 and notify_on_start }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "⚡ Battery Equalization Started"
+                      message: >
+                        Equalization charge in progress
+
+                        Battery Type: {{ battery_type }}
+                        Current SOC: {{ battery_soc }}%
+                        Temperature: {{ battery_temp }}°C
+                        Duration: {{ equalization_duration }} hours
+
+                        ⚠️ Do not disconnect battery during equalization
+                      data:
+                        tag: "srne_equalization"
+                        priority: high
+
+          # Phase 3: Wait for equalization duration
+          - delay:
+              hours: !input equalization_duration
+
+          # Phase 4: Disable equalization
+          - service: switch.turn_off
+            target:
+              entity_id: !input equalization_enable_switch
+
+          # Phase 5: Switch to post-equalization priority
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input post_equalization_priority
+
+          - service: system_log.write
+            data:
+              message: "Equalization: Completed successfully"
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.equalization
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 and enable_completion_notification }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "✅ Equalization Complete"
+                      message: >
+                        Battery equalization finished successfully
+
+                        Final voltage: {{ states(battery_voltage_sensor) }}V
+                        Switched to {{ post_equalization_priority }} mode
+                      data:
+                        tag: "srne_equalization"
+
+          # Clear confirmation boolean if used
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ require_confirm and confirmation_boolean is defined and confirmation_boolean != none }}"
+                sequence:
+                  - service: input_boolean.turn_off
+                    target:
+                      entity_id: !input confirmation_boolean
+
+      # Skip equalization
+      - conditions: []
+        sequence:
+          - service: system_log.write
+            data:
+              message: >
+                Equalization: Skipped
+                Reason: {% if not should_run_today %}Not scheduled for today
+                {% elif not safety_checks_passed %}{{ skip_reason }}
+                {% elif not confirmation_ok %}Manual confirmation required
+                {% else %}Unknown reason{% endif %}
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.equalization
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 and notify_on_skip and trigger.id == 'scheduled' }}"
+                  - condition: template
+                    value_template: "{{ not safety_checks_passed }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "⏭️ Equalization Skipped"
+                      message: >
+                        Scheduled equalization did not run
+
+                        Reason: {{ skip_reason }}
+
+                        Current conditions:
+                        - SOC: {{ battery_soc }}%
+                        - Temperature: {{ battery_temp }}°C
+                      data:
+                        tag: "srne_equalization"
+                        priority: low
+
+mode: single
+max_exceeded: silent

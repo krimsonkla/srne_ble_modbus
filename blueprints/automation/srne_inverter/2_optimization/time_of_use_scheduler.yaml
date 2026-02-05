@@ -1,0 +1,421 @@
+blueprint:
+  name: "SRNE Inverter - Time of Use Scheduler"
+  description: >
+    Comprehensive daily mode switching based on time-of-use electricity rates and solar availability.
+    Automatically transitions between charging during off-peak, solar generation during peak sun,
+    and load management during peak rate periods. Optimizes for cost savings and energy independence.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/2_optimization/time_of_use_scheduler.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    priority_select:
+      name: Energy Priority Select
+      description: Energy priority select entity
+      selector:
+        entity:
+          domain: select
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    pv_power_sensor:
+      name: PV Power Sensor (Optional)
+      description: Solar panel power production sensor for smart switching
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    # Off-Peak Period (Night Charging)
+    off_peak_start_time:
+      name: Off-Peak Start Time
+      description: When off-peak rates begin (night charging period)
+      default: "22:00:00"
+      selector:
+        time:
+
+    off_peak_end_time:
+      name: Off-Peak End Time
+      description: When off-peak rates end
+      default: "06:00:00"
+      selector:
+        time:
+
+    off_peak_priority:
+      name: Off-Peak Priority Mode
+      description: Priority during off-peak hours (typically charge from grid)
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Utility First"
+            - "Battery First"
+            - "Solar First"
+
+    off_peak_min_soc:
+      name: Off-Peak Minimum SOC Target
+      description: Don't charge during off-peak if SOC is above this (%)
+      default: 90
+      selector:
+        number:
+          min: 50
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+
+    # Solar Period (Peak Generation)
+    solar_start_time:
+      name: Solar Period Start Time
+      description: When to switch to solar priority (morning)
+      default: "06:00:00"
+      selector:
+        time:
+
+    solar_end_time:
+      name: Solar Period End Time
+      description: When to end solar priority (afternoon)
+      default: "17:00:00"
+      selector:
+        time:
+
+    solar_priority:
+      name: Solar Period Priority Mode
+      description: Priority during solar production hours
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Battery First"
+            - "Utility First"
+
+    solar_min_production:
+      name: Solar Minimum Production (Optional)
+      description: Only switch to solar priority if PV exceeds this (watts, 0 to disable)
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 100
+          unit_of_measurement: "W"
+
+    # Peak Period (Evening Load)
+    peak_start_time:
+      name: Peak Rate Start Time
+      description: When peak electricity rates begin (evening)
+      default: "17:00:00"
+      selector:
+        time:
+
+    peak_end_time:
+      name: Peak Rate End Time
+      description: When peak rates end
+      default: "22:00:00"
+      selector:
+        time:
+
+    peak_priority:
+      name: Peak Rate Priority Mode
+      description: Priority during peak rate hours (typically use battery)
+      default: "Battery First"
+      selector:
+        select:
+          options:
+            - "Battery First"
+            - "Solar First"
+            - "Utility First"
+
+    peak_min_soc:
+      name: Peak Period Minimum SOC
+      description: Switch to Utility First if SOC drops below this during peak (%)
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 50
+          step: 5
+          unit_of_measurement: "%"
+
+    # Battery Reserve Settings
+    enable_battery_reserve:
+      name: Enable Battery Reserve Protection
+      description: Maintain minimum battery reserve across all periods
+      default: true
+      selector:
+        boolean:
+
+    battery_reserve_soc:
+      name: Battery Reserve SOC
+      description: Never discharge below this SOC regardless of schedule (%)
+      default: 20
+      selector:
+        number:
+          min: 10
+          max: 40
+          step: 5
+          unit_of_measurement: "%"
+
+    # Advanced Options
+    enable_smart_transitions:
+      name: Enable Smart Transitions
+      description: Use solar production and SOC data for intelligent mode switching
+      default: true
+      selector:
+        boolean:
+
+    transition_hysteresis:
+      name: Transition Hysteresis
+      description: Wait time before switching modes to prevent flapping (minutes)
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 5
+          unit_of_measurement: "minutes"
+
+    weekend_same_schedule:
+      name: Use Same Schedule on Weekends
+      description: Apply weekday schedule to weekends (disable for different weekend rates)
+      default: true
+      selector:
+        boolean:
+
+    enable_notifications:
+      name: Enable Notifications
+      description: Notify on mode changes
+      default: false
+      selector:
+        boolean:
+
+    notification_service:
+      name: Notification Service (Optional)
+      description: Service for mode change notifications
+      default: ""
+      selector:
+        text:
+
+trigger:
+  # Time-based triggers for each period
+  - platform: time
+    at: !input off_peak_start_time
+    id: "off_peak_start"
+
+  - platform: time
+    at: !input solar_start_time
+    id: "solar_start"
+
+  - platform: time
+    at: !input peak_start_time
+    id: "peak_start"
+
+  # Battery protection triggers
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input battery_reserve_soc
+    id: "battery_reserve_low"
+
+  - platform: numeric_state
+    entity_id: !input battery_soc_sensor
+    below: !input peak_min_soc
+    id: "battery_peak_low"
+
+  # Startup trigger
+  - platform: homeassistant
+    event: start
+    id: "ha_start"
+
+condition: []
+
+action:
+  - variables:
+      battery_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      current_time: "{{ now().time() }}"
+      is_weekend: "{{ now().isoweekday() in [6, 7] }}"
+      weekend_same: !input weekend_same_schedule
+      enable_smart: !input enable_smart_transitions
+      enable_reserve: !input enable_battery_reserve
+      reserve_soc: !input battery_reserve_soc
+      off_peak_min: !input off_peak_min_soc
+      peak_min: !input peak_min_soc
+
+  # Get solar production if available
+  - variables:
+      pv_power: >
+        {% if pv_power_sensor is defined and pv_power_sensor != none %}
+          {{ states(pv_power_sensor) | float(0) }}
+        {% else %}
+          0
+        {% endif %}
+      solar_min: !input solar_min_production
+
+  # Skip if weekend and different schedule enabled
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ is_weekend and not weekend_same }}"
+        sequence:
+          - stop: "Weekend schedule not configured"
+
+  # Determine current period and target priority
+  - variables:
+      off_peak_start: !input off_peak_start_time
+      off_peak_end: !input off_peak_end_time
+      solar_start: !input solar_start_time
+      solar_end: !input solar_end_time
+      peak_start: !input peak_start_time
+      peak_end: !input peak_end_time
+
+      current_period: >
+        {% set ct = now().time() %}
+        {% set off_s = strptime(off_peak_start, '%H:%M:%S').time() %}
+        {% set off_e = strptime(off_peak_end, '%H:%M:%S').time() %}
+        {% set sol_s = strptime(solar_start, '%H:%M:%S').time() %}
+        {% set sol_e = strptime(solar_end, '%H:%M:%S').time() %}
+        {% set pk_s = strptime(peak_start, '%H:%M:%S').time() %}
+        {% set pk_e = strptime(peak_end, '%H:%M:%S').time() %}
+
+        {% if (off_s < off_e and ct >= off_s and ct < off_e) or
+              (off_s > off_e and (ct >= off_s or ct < off_e)) %}
+          off-peak
+        {% elif ct >= sol_s and ct < sol_e %}
+          solar
+        {% elif (pk_s < pk_e and ct >= pk_s and ct < pk_e) or
+                (pk_s > pk_e and (ct >= pk_s or ct < pk_e)) %}
+          peak
+        {% else %}
+          solar
+        {% endif %}
+
+      base_priority: >
+        {% if current_period == 'off-peak' %}
+          {{ off_peak_priority }}
+        {% elif current_period == 'solar' %}
+          {{ solar_priority }}
+        {% elif current_period == 'peak' %}
+          {{ peak_priority }}
+        {% else %}
+          {{ solar_priority }}
+        {% endif %}
+
+  # Apply smart adjustments
+  - variables:
+      target_priority: >
+        {% set priority = base_priority %}
+
+        {# Battery reserve protection #}
+        {% if enable_reserve and battery_soc < reserve_soc %}
+          {% set priority = 'Utility First' %}
+        {% endif %}
+
+        {# Off-peak SOC check #}
+        {% if current_period == 'off-peak' and battery_soc >= off_peak_min %}
+          {% set priority = 'Battery First' %}
+        {% endif %}
+
+        {# Peak period low battery protection #}
+        {% if current_period == 'peak' and battery_soc < peak_min %}
+          {% set priority = 'Utility First' %}
+        {% endif %}
+
+        {# Smart solar switching #}
+        {% if enable_smart and current_period == 'solar' and solar_min > 0 %}
+          {% if pv_power < solar_min %}
+            {% set priority = 'Battery First' %}
+          {% endif %}
+        {% endif %}
+
+        {{ priority }}
+
+      reason: >
+        {% if enable_reserve and battery_soc < reserve_soc %}
+          Battery reserve protection ({{ battery_soc }}% < {{ reserve_soc }}%)
+        {% elif current_period == 'off-peak' and battery_soc >= off_peak_min %}
+          Battery charged ({{ battery_soc }}% >= {{ off_peak_min }}%)
+        {% elif current_period == 'peak' and battery_soc < peak_min %}
+          Low battery during peak ({{ battery_soc }}% < {{ peak_min }}%)
+        {% elif enable_smart and current_period == 'solar' and pv_power < solar_min %}
+          Low solar production ({{ pv_power }}W < {{ solar_min }}W)
+        {% elif trigger.id == 'ha_start' %}
+          Home Assistant started
+        {% else %}
+          {{ current_period | title }} period schedule
+        {% endif %}
+
+  # Only switch if priority is different
+  - condition: template
+    value_template: "{{ states(priority_select) != target_priority }}"
+
+  # Apply hysteresis delay (except for HA start and battery protection)
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.id not in ['ha_start', 'battery_reserve_low', 'battery_peak_low'] }}
+          - condition: template
+            value_template: "{{ transition_hysteresis > 0 }}"
+        sequence:
+          - delay:
+              minutes: !input transition_hysteresis
+
+          # Re-check condition after delay
+          - condition: template
+            value_template: "{{ states(priority_select) != target_priority }}"
+
+  # Switch priority mode
+  - service: select.select_option
+    target:
+      entity_id: !input priority_select
+    data:
+      option: "{{ target_priority }}"
+
+  # Log the change
+  - service: system_log.write
+    data:
+      message: >
+        TOU Scheduler: Switched to {{ target_priority }}
+        Period: {{ current_period }}, SOC: {{ battery_soc }}%, Reason: {{ reason }}
+      level: info
+      logger: homeassistant.components.srne_ble_modbus.tou_scheduler
+
+  # Optional notification
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ enable_notifications }}"
+          - condition: template
+            value_template: "{{ notification_service | length > 0 }}"
+        sequence:
+          - service: !input notification_service
+            data:
+              title: "⏰ Energy Mode Changed"
+              message: >
+                Switched to {{ target_priority }}
+
+                Period: {{ current_period | title }}
+                Battery SOC: {{ battery_soc }}%
+                {% if pv_power > 0 %}
+                Solar: {{ pv_power | round(0) }}W
+                {% endif %}
+
+                Reason: {{ reason }}
+              data:
+                tag: "srne_tou_scheduler"
+                priority: low
+
+mode: restart

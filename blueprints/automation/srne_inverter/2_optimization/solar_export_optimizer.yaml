@@ -1,0 +1,511 @@
+blueprint:
+  name: "SRNE Inverter - Solar Export Optimizer"
+  description: >
+    Maximizes solar self-consumption by automatically controlling high-power devices when excess
+    solar is being exported to the grid. Prioritizes using solar energy locally before export.
+    Supports multiple devices with priority levels and maintains battery minimum threshold.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/2_optimization/solar_export_optimizer.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    grid_power_sensor:
+      name: Grid Power Sensor
+      description: Grid power sensor (negative = export, positive = import)
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    pv_power_sensor:
+      name: PV Power Sensor
+      description: Solar panel power production sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    # Priority 1 Device (Highest)
+    priority_1_device:
+      name: Priority 1 Device
+      description: First device to enable (e.g., water heater, pool pump)
+      selector:
+        entity:
+          domain: switch
+
+    priority_1_power:
+      name: Priority 1 Device Power
+      description: Expected power consumption of priority 1 device (watts)
+      default: 2000
+      selector:
+        number:
+          min: 100
+          max: 10000
+          step: 100
+          unit_of_measurement: "W"
+
+    # Priority 2 Device
+    enable_priority_2:
+      name: Enable Priority 2 Device
+      description: Use a second device for solar surplus
+      default: false
+      selector:
+        boolean:
+
+    priority_2_device:
+      name: Priority 2 Device (Optional)
+      description: Second device to enable with excess solar
+      default: {}
+      selector:
+        entity:
+          domain: switch
+
+    priority_2_power:
+      name: Priority 2 Device Power
+      description: Expected power consumption of priority 2 device (watts)
+      default: 1500
+      selector:
+        number:
+          min: 100
+          max: 10000
+          step: 100
+          unit_of_measurement: "W"
+
+    # Priority 3 Device
+    enable_priority_3:
+      name: Enable Priority 3 Device
+      description: Use a third device for solar surplus
+      default: false
+      selector:
+        boolean:
+
+    priority_3_device:
+      name: Priority 3 Device (Optional)
+      description: Third device to enable with excess solar
+      default: {}
+      selector:
+        entity:
+          domain: switch
+
+    priority_3_power:
+      name: Priority 3 Device Power
+      description: Expected power consumption of priority 3 device (watts)
+      default: 1000
+      selector:
+        number:
+          min: 100
+          max: 10000
+          step: 100
+          unit_of_measurement: "W"
+
+    # Export thresholds
+    export_start_threshold:
+      name: Export Start Threshold
+      description: Start devices when export exceeds this value (watts, negative)
+      default: -2000
+      selector:
+        number:
+          min: -10000
+          max: -500
+          step: 100
+          unit_of_measurement: "W"
+
+    export_stop_threshold:
+      name: Export Stop Threshold
+      description: Stop devices when export drops below this value (watts, negative)
+      default: -500
+      selector:
+        number:
+          min: -2000
+          max: -100
+          step: 100
+          unit_of_measurement: "W"
+
+    start_hysteresis:
+      name: Start Condition Duration
+      description: Export must exceed threshold for this duration before starting devices (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: "minutes"
+
+    stop_hysteresis:
+      name: Stop Condition Duration
+      description: Export must drop for this duration before stopping devices (minutes)
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 15
+          step: 1
+          unit_of_measurement: "minutes"
+
+    # Battery protection
+    battery_minimum_soc:
+      name: Battery Minimum SOC
+      description: Only enable devices if battery is above this level (%)
+      default: 80
+      selector:
+        number:
+          min: 50
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+
+    pv_minimum_production:
+      name: PV Minimum Production
+      description: Require minimum solar production before enabling devices (watts)
+      default: 3000
+      selector:
+        number:
+          min: 1000
+          max: 15000
+          step: 500
+          unit_of_measurement: "W"
+
+    # Advanced settings
+    enable_sequential_start:
+      name: Enable Sequential Device Start
+      description: Start devices one at a time based on available surplus
+      default: true
+      selector:
+        boolean:
+
+    device_start_delay:
+      name: Device Start Delay
+      description: Wait between starting multiple devices (seconds)
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 300
+          step: 10
+          unit_of_measurement: "s"
+
+    enable_smart_scheduling:
+      name: Enable Smart Scheduling
+      description: Consider time of day and typical usage patterns
+      default: false
+      selector:
+        boolean:
+
+    smart_start_time:
+      name: Smart Schedule Start Time
+      description: Earliest time to enable devices (for smart scheduling)
+      default: "09:00:00"
+      selector:
+        time:
+
+    smart_end_time:
+      name: Smart Schedule End Time
+      description: Latest time to enable devices (for smart scheduling)
+      default: "16:00:00"
+      selector:
+        time:
+
+    enable_notifications:
+      name: Enable Notifications
+      description: Notify when devices are enabled/disabled
+      default: true
+      selector:
+        boolean:
+
+    notification_service:
+      name: Notification Service
+      description: Service for device control notifications
+      default: ""
+      selector:
+        text:
+
+trigger:
+  # High export detected - start devices
+  - platform: numeric_state
+    entity_id: !input grid_power_sensor
+    below: !input export_start_threshold
+    for:
+      minutes: !input start_hysteresis
+    id: "high_export"
+
+  # Low export - stop devices
+  - platform: numeric_state
+    entity_id: !input grid_power_sensor
+    above: !input export_stop_threshold
+    for:
+      minutes: !input stop_hysteresis
+    id: "low_export"
+
+  # Battery check
+  - platform: state
+    entity_id: !input battery_soc_sensor
+    id: "battery_change"
+
+  # Periodic reassessment
+  - platform: time_pattern
+    minutes: "/10"
+    id: "periodic_check"
+
+condition: []
+
+action:
+  - variables:
+      grid_power: "{{ states(grid_power_sensor) | float(0) }}"
+      pv_power: "{{ states(pv_power_sensor) | float(0) }}"
+      battery_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      p1_state: "{{ states(priority_1_device) }}"
+      export_start: !input export_start_threshold
+      export_stop: !input export_stop_threshold
+      battery_min: !input battery_minimum_soc
+      pv_min: !input pv_minimum_production
+      enable_p2: !input enable_priority_2
+      enable_p3: !input enable_priority_3
+      enable_sequential: !input enable_sequential_start
+      enable_smart: !input enable_smart_scheduling
+
+  # Check smart schedule if enabled
+  - variables:
+      in_schedule: >
+        {% if enable_smart %}
+          {% set ct = now().time() %}
+          {% set start = strptime(smart_start_time, '%H:%M:%S').time() %}
+          {% set end = strptime(smart_end_time, '%H:%M:%S').time() %}
+          {{ ct >= start and ct < end }}
+        {% else %}
+          true
+        {% endif %}
+
+  # Get device states
+  - variables:
+      p2_state: >
+        {% if enable_p2 and priority_2_device is defined and priority_2_device != none %}
+          {{ states(priority_2_device) }}
+        {% else %}
+          unavailable
+        {% endif %}
+      p3_state: >
+        {% if enable_p3 and priority_3_device is defined and priority_3_device != none %}
+          {{ states(priority_3_device) }}
+        {% else %}
+          unavailable
+        {% endif %}
+
+  # Calculate available surplus (negative = export available)
+  - variables:
+      available_export: "{{ grid_power }}"
+      p1_power: !input priority_1_power
+      p2_power: !input priority_2_power
+      p3_power: !input priority_3_power
+
+  # Base conditions check
+  - variables:
+      conditions_met: >
+        {{ battery_soc >= battery_min and
+           pv_power >= pv_min and
+           in_schedule and
+           now().hour >= 6 and now().hour <= 18 }}
+
+  # Decision logic for each trigger
+  - choose:
+      # High export - enable devices
+      - conditions:
+          - condition: trigger
+            id: "high_export"
+          - condition: template
+            value_template: "{{ conditions_met }}"
+          - condition: template
+            value_template: "{{ grid_power < export_start }}"
+        sequence:
+          # Enable Priority 1
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ p1_state == 'off' }}"
+                  - condition: template
+                    value_template: "{{ grid_power < export_start }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input priority_1_device
+
+                  - service: system_log.write
+                    data:
+                      message: >
+                        Solar Export Optimizer: Enabled priority 1 device
+                        (Export: {{ grid_power }}W, PV: {{ pv_power }}W, SOC: {{ battery_soc }}%)
+                      level: info
+                      logger: homeassistant.components.srne_ble_modbus.export_optimizer
+
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ enable_notifications and notification_service | length > 0 }}"
+                        sequence:
+                          - service: !input notification_service
+                            data:
+                              title: "☀️ Solar Device Enabled"
+                              message: >
+                                Priority 1 device started
+
+                                Excess solar: {{ (grid_power * -1) | round(0) }}W
+                                Battery: {{ battery_soc }}%
+                              data:
+                                tag: "srne_export_optimizer"
+
+                  # Wait before starting next device
+                  - condition: template
+                    value_template: "{{ enable_sequential }}"
+                  - delay:
+                      seconds: !input device_start_delay
+
+          # Enable Priority 2 if conditions allow
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_p2 }}"
+                  - condition: template
+                    value_template: "{{ p1_state == 'on' }}"
+                  - condition: template
+                    value_template: "{{ p2_state == 'off' }}"
+                  - condition: template
+                    value_template: "{{ grid_power < (export_start - p1_power) }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input priority_2_device
+
+                  - service: system_log.write
+                    data:
+                      message: "Solar Export Optimizer: Enabled priority 2 device"
+                      level: info
+                      logger: homeassistant.components.srne_ble_modbus.export_optimizer
+
+                  - condition: template
+                    value_template: "{{ enable_sequential }}"
+                  - delay:
+                      seconds: !input device_start_delay
+
+          # Enable Priority 3 if conditions allow
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_p3 }}"
+                  - condition: template
+                    value_template: "{{ p1_state == 'on' and p2_state == 'on' }}"
+                  - condition: template
+                    value_template: "{{ p3_state == 'off' }}"
+                  - condition: template
+                    value_template: "{{ grid_power < (export_start - p1_power - p2_power) }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input priority_3_device
+
+                  - service: system_log.write
+                    data:
+                      message: "Solar Export Optimizer: Enabled priority 3 device"
+                      level: info
+                      logger: homeassistant.components.srne_ble_modbus.export_optimizer
+
+      # Low export or conditions not met - disable devices
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "low_export"
+              - condition: template
+                value_template: "{{ not conditions_met }}"
+              - condition: template
+                value_template: "{{ grid_power > export_stop }}"
+        sequence:
+          # Disable in reverse order (Priority 3 first)
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_p3 and p3_state == 'on' }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input priority_3_device
+
+                  - service: system_log.write
+                    data:
+                      message: "Solar Export Optimizer: Disabled priority 3 device"
+                      level: info
+                      logger: homeassistant.components.srne_ble_modbus.export_optimizer
+
+                  - delay:
+                      seconds: 5
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_p2 and p2_state == 'on' }}"
+                  - condition: template
+                    value_template: "{{ grid_power > (export_stop + p3_power) }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input priority_2_device
+
+                  - service: system_log.write
+                    data:
+                      message: "Solar Export Optimizer: Disabled priority 2 device"
+                      level: info
+                      logger: homeassistant.components.srne_ble_modbus.export_optimizer
+
+                  - delay:
+                      seconds: 5
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ p1_state == 'on' }}"
+                  - condition: template
+                    value_template: "{{ grid_power > (export_stop + p2_power + p3_power) }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input priority_1_device
+
+                  - service: system_log.write
+                    data:
+                      message: >
+                        Solar Export Optimizer: Disabled priority 1 device
+                        (Export: {{ grid_power }}W, Reason: {{ 'Low export' if trigger.id == 'low_export' else 'Conditions not met' }})
+                      level: info
+                      logger: homeassistant.components.srne_ble_modbus.export_optimizer
+
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ enable_notifications and notification_service | length > 0 }}"
+                        sequence:
+                          - service: !input notification_service
+                            data:
+                              title: "Solar Device Disabled"
+                              message: >
+                                All devices stopped
+
+                                Export reduced to {{ (grid_power * -1) | round(0) }}W
+                              data:
+                                tag: "srne_export_optimizer"
+
+mode: queued
+max: 3

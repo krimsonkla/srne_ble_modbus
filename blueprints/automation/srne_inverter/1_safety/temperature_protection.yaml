@@ -1,0 +1,600 @@
+blueprint:
+  name: "SRNE Inverter - Temperature Protection"
+  description: >
+    Monitors battery temperature and automatically stops charging or discharging when
+    temperature limits are exceeded. Prevents battery damage from thermal stress.
+
+    Features:
+    - Separate charge and discharge temperature limits
+    - Configurable hysteresis to prevent oscillation
+    - Automatic recovery with safety delays
+    - Temperature-aware priority switching
+    - Real-time notifications
+
+    This blueprint works independently but coordinates with Progressive Battery Protection
+    for comprehensive battery safety.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/1_safety/temperature_protection.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_inverter
+
+    battery_temp_sensor:
+      name: Battery Temperature Sensor
+      description: Battery temperature sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor (Optional)
+      description: Battery State of Charge for enhanced notifications
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    # Temperature Thresholds
+    charge_max_temperature:
+      name: Charge Maximum Temperature
+      description: Stop charging when battery exceeds this temperature
+      default: 45
+      selector:
+        number:
+          min: 30
+          max: 60
+          step: 1
+          unit_of_measurement: "°C"
+
+    charge_min_temperature:
+      name: Charge Minimum Temperature
+      description: Stop charging when battery below this temperature
+      default: 0
+      selector:
+        number:
+          min: -30
+          max: 10
+          step: 1
+          unit_of_measurement: "°C"
+
+    discharge_max_temperature:
+      name: Discharge Maximum Temperature
+      description: Stop discharging when battery exceeds this temperature
+      default: 60
+      selector:
+        number:
+          min: 40
+          max: 70
+          step: 1
+          unit_of_measurement: "°C"
+
+    discharge_min_temperature:
+      name: Discharge Minimum Temperature
+      description: Stop discharging when battery below this temperature
+      default: -20
+      selector:
+        number:
+          min: -30
+          max: 0
+          step: 1
+          unit_of_measurement: "°C"
+
+    # Hysteresis Configuration
+    temp_hysteresis:
+      name: Temperature Hysteresis
+      description: Temperature must drop/rise this much before resuming operation
+      default: 5
+      selector:
+        number:
+          min: 2
+          max: 15
+          step: 1
+          unit_of_measurement: "°C"
+
+    recovery_delay:
+      name: Recovery Delay
+      description: Wait time after temperature normalizes before resuming
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 300
+          step: 10
+          unit_of_measurement: "seconds"
+
+    # Control Entities
+    charging_switch:
+      name: Battery Charging Switch (Optional)
+      description: Switch to control battery charging
+      default: {}
+      selector:
+        entity:
+          domain: switch
+
+    priority_select:
+      name: Priority Select Entity
+      description: Energy priority control for discharge protection
+      selector:
+        entity:
+          domain: select
+
+    high_temp_priority:
+      name: High Temperature Priority Mode
+      description: Priority when discharge temperature exceeded
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Utility First"
+            - "Solar First"
+
+    normal_priority:
+      name: Normal Priority Mode
+      description: Priority to restore after temperature normalizes
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Battery First"
+            - "Utility First"
+
+    # Notification Configuration
+    notification_service:
+      name: Notification Service
+      description: Service for temperature alerts
+      selector:
+        text:
+
+    send_recovery_notifications:
+      name: Send Recovery Notifications
+      description: Notify when temperature returns to normal
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # High charging temperature
+  - platform: numeric_state
+    entity_id: !input battery_temp_sensor
+    above: !input charge_max_temperature
+    id: "charge_temp_high"
+
+  # Low charging temperature
+  - platform: numeric_state
+    entity_id: !input battery_temp_sensor
+    below: !input charge_min_temperature
+    id: "charge_temp_low"
+
+  # High discharge temperature
+  - platform: numeric_state
+    entity_id: !input battery_temp_sensor
+    above: !input discharge_max_temperature
+    id: "discharge_temp_high"
+
+  # Low discharge temperature
+  - platform: numeric_state
+    entity_id: !input battery_temp_sensor
+    below: !input discharge_min_temperature
+    id: "discharge_temp_low"
+
+  # Temperature recovered from high charge limit
+  - platform: template
+    value_template: >
+      {% set temp = states(battery_temp_sensor) | float(25) %}
+      {% set max_temp = charge_max_temperature %}
+      {% set hyst = temp_hysteresis %}
+      {{ temp < (max_temp - hyst) }}
+    for:
+      seconds: !input recovery_delay
+    id: "charge_high_recovered"
+
+  # Temperature recovered from low charge limit
+  - platform: template
+    value_template: >
+      {% set temp = states(battery_temp_sensor) | float(25) %}
+      {% set min_temp = charge_min_temperature %}
+      {% set hyst = temp_hysteresis %}
+      {{ temp > (min_temp + hyst) }}
+    for:
+      seconds: !input recovery_delay
+    id: "charge_low_recovered"
+
+  # Temperature recovered from high discharge limit
+  - platform: template
+    value_template: >
+      {% set temp = states(battery_temp_sensor) | float(25) %}
+      {% set max_temp = discharge_max_temperature %}
+      {% set hyst = temp_hysteresis %}
+      {{ temp < (max_temp - hyst) }}
+    for:
+      seconds: !input recovery_delay
+    id: "discharge_high_recovered"
+
+  # Temperature recovered from low discharge limit
+  - platform: template
+    value_template: >
+      {% set temp = states(battery_temp_sensor) | float(25) %}
+      {% set min_temp = discharge_min_temperature %}
+      {% set hyst = temp_hysteresis %}
+      {{ temp > (min_temp + hyst) }}
+    for:
+      seconds: !input recovery_delay
+    id: "discharge_low_recovered"
+
+condition: []
+
+action:
+  - variables:
+      temp: "{{ states(battery_temp_sensor) | float(25) }}"
+      soc: "{{ states(battery_soc_sensor) | float(50) if battery_soc_sensor is defined and battery_soc_sensor != none else 'N/A' }}"
+      trigger_id: "{{ trigger.id }}"
+      charge_max: !input charge_max_temperature
+      charge_min: !input charge_min_temperature
+      discharge_max: !input discharge_max_temperature
+      discharge_min: !input discharge_min_temperature
+      hyst: !input temp_hysteresis
+      timestamp: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  - choose:
+      # ==========================================
+      # CHARGING PROTECTION
+      # ==========================================
+
+      # High charging temperature
+      - conditions:
+          - condition: trigger
+            id: "charge_temp_high"
+        sequence:
+          # Disable charging
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ charging_switch is defined and charging_switch != none }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input charging_switch
+
+          # Send alert
+          - service: !input notification_service
+            data:
+              title: "🌡️ High Battery Temperature - Charging Stopped"
+              message: >
+                Battery temperature {{ temp }}°C exceeds charging limit ({{ charge_max }}°C).
+
+                Protection Action:
+                - Charging disabled
+                - Will resume when temp drops below {{ charge_max - hyst }}°C
+
+                Current Status:
+                - Time: {{ timestamp }}
+                {% if soc != 'N/A' %}
+                - Battery SOC: {{ soc }}%
+                {% endif %}
+                - Temperature: {{ temp }}°C
+
+                Battery will cool down naturally. Ensure adequate ventilation.
+              data:
+                priority: high
+                tag: "srne_temp_charge_high"
+
+          # Log event
+          - service: system_log.write
+            data:
+              message: >
+                Temperature Protection: Charging stopped - battery temp {{ temp }}°C exceeds {{ charge_max }}°C limit
+              level: warning
+              logger: homeassistant.components.srne_inverter
+
+      # Low charging temperature
+      - conditions:
+          - condition: trigger
+            id: "charge_temp_low"
+        sequence:
+          # Disable charging
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ charging_switch is defined and charging_switch != none }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input charging_switch
+
+          # Send alert
+          - service: !input notification_service
+            data:
+              title: "❄️ Low Battery Temperature - Charging Stopped"
+              message: >
+                Battery temperature {{ temp }}°C below charging limit ({{ charge_min }}°C).
+
+                Protection Action:
+                - Charging disabled to prevent damage
+                - Will resume when temp rises above {{ charge_min + hyst }}°C
+
+                Current Status:
+                - Time: {{ timestamp }}
+                {% if soc != 'N/A' %}
+                - Battery SOC: {{ soc }}%
+                {% endif %}
+                - Temperature: {{ temp }}°C
+
+                Cold charging can damage batteries. Allow battery to warm naturally.
+              data:
+                priority: high
+                tag: "srne_temp_charge_low"
+
+          # Log event
+          - service: system_log.write
+            data:
+              message: >
+                Temperature Protection: Charging stopped - battery temp {{ temp }}°C below {{ charge_min }}°C limit
+              level: warning
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # DISCHARGING PROTECTION
+      # ==========================================
+
+      # High discharge temperature
+      - conditions:
+          - condition: trigger
+            id: "discharge_temp_high"
+        sequence:
+          # Switch to grid priority to reduce battery load
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input high_temp_priority
+
+          # Send critical alert
+          - service: !input notification_service
+            data:
+              title: "🔥 CRITICAL - High Discharge Temperature"
+              message: >
+                Battery temperature {{ temp }}°C EXCEEDS discharge limit ({{ discharge_max }}°C)!
+
+                CRITICAL Protection Action:
+                - Switched to {{ high_temp_priority }} to reduce battery load
+                - Will restore when temp drops below {{ discharge_max - hyst }}°C
+
+                Current Status:
+                - Time: {{ timestamp }}
+                {% if soc != 'N/A' %}
+                - Battery SOC: {{ soc }}%
+                {% endif %}
+                - Temperature: {{ temp }}°C
+
+                ⚠️ High discharge temperature can indicate:
+                - Excessive load on battery
+                - Poor ventilation
+                - Battery degradation
+                - Potential safety hazard
+
+                CHECK BATTERY SYSTEM IMMEDIATELY!
+              data:
+                priority: high
+                ttl: 0
+                tag: "srne_temp_discharge_high"
+
+          # Log critical event
+          - service: system_log.write
+            data:
+              message: >
+                Temperature Protection: CRITICAL - discharge temp {{ temp }}°C exceeds {{ discharge_max }}°C limit. Switched to grid priority.
+              level: error
+              logger: homeassistant.components.srne_inverter
+
+      # Low discharge temperature
+      - conditions:
+          - condition: trigger
+            id: "discharge_temp_low"
+        sequence:
+          # Switch to grid priority to reduce battery strain
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input high_temp_priority
+
+          # Send alert
+          - service: !input notification_service
+            data:
+              title: "❄️ Low Discharge Temperature"
+              message: >
+                Battery temperature {{ temp }}°C below discharge limit ({{ discharge_min }}°C).
+
+                Protection Action:
+                - Switched to {{ high_temp_priority }} to protect battery
+                - Will restore when temp rises above {{ discharge_min + hyst }}°C
+
+                Current Status:
+                - Time: {{ timestamp }}
+                {% if soc != 'N/A' %}
+                - Battery SOC: {{ soc }}%
+                {% endif %}
+                - Temperature: {{ temp }}°C
+
+                Cold discharge reduces capacity and can damage batteries.
+              data:
+                priority: high
+                tag: "srne_temp_discharge_low"
+
+          # Log event
+          - service: system_log.write
+            data:
+              message: >
+                Temperature Protection: Discharge restricted - battery temp {{ temp }}°C below {{ discharge_min }}°C limit
+              level: warning
+              logger: homeassistant.components.srne_inverter
+
+      # ==========================================
+      # RECOVERY
+      # ==========================================
+
+      # Charge high temperature recovered
+      - conditions:
+          - condition: trigger
+            id: "charge_high_recovered"
+        sequence:
+          # Re-enable charging
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ charging_switch is defined and charging_switch != none }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input charging_switch
+
+          # Optional recovery notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ send_recovery_notifications }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "✅ Temperature Normal - Charging Resumed"
+                      message: >
+                        Battery temperature recovered to {{ temp }}°C.
+                        Charging re-enabled.
+
+                        {% if soc != 'N/A' %}Battery SOC: {{ soc }}%{% endif %}
+                      data:
+                        tag: "srne_temp_charge_high"
+
+          # Log recovery
+          - service: system_log.write
+            data:
+              message: >
+                Temperature Protection: Charging resumed - temp {{ temp }}°C normalized
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+      # Charge low temperature recovered
+      - conditions:
+          - condition: trigger
+            id: "charge_low_recovered"
+        sequence:
+          # Re-enable charging
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ charging_switch is defined and charging_switch != none }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input charging_switch
+
+          # Optional recovery notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ send_recovery_notifications }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "✅ Temperature Normal - Charging Resumed"
+                      message: >
+                        Battery temperature warmed to {{ temp }}°C.
+                        Charging re-enabled.
+
+                        {% if soc != 'N/A' %}Battery SOC: {{ soc }}%{% endif %}
+                      data:
+                        tag: "srne_temp_charge_low"
+
+          # Log recovery
+          - service: system_log.write
+            data:
+              message: >
+                Temperature Protection: Charging resumed - temp {{ temp }}°C normalized
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+      # Discharge high temperature recovered
+      - conditions:
+          - condition: trigger
+            id: "discharge_high_recovered"
+        sequence:
+          # Restore normal priority
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input normal_priority
+
+          # Optional recovery notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ send_recovery_notifications }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "✅ Temperature Normal - Priority Restored"
+                      message: >
+                        Battery temperature recovered to {{ temp }}°C.
+                        Restored {{ normal_priority }} priority.
+
+                        {% if soc != 'N/A' %}Battery SOC: {{ soc }}%{% endif %}
+                      data:
+                        tag: "srne_temp_discharge_high"
+
+          # Log recovery
+          - service: system_log.write
+            data:
+              message: >
+                Temperature Protection: Discharge normalized - temp {{ temp }}°C, priority restored
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+      # Discharge low temperature recovered
+      - conditions:
+          - condition: trigger
+            id: "discharge_low_recovered"
+        sequence:
+          # Restore normal priority
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input normal_priority
+
+          # Optional recovery notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ send_recovery_notifications }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "✅ Temperature Normal - Priority Restored"
+                      message: >
+                        Battery temperature warmed to {{ temp }}°C.
+                        Restored {{ normal_priority }} priority.
+
+                        {% if soc != 'N/A' %}Battery SOC: {{ soc }}%{% endif %}
+                      data:
+                        tag: "srne_temp_discharge_low"
+
+          # Log recovery
+          - service: system_log.write
+            data:
+              message: >
+                Temperature Protection: Discharge normalized - temp {{ temp }}°C, priority restored
+              level: info
+              logger: homeassistant.components.srne_inverter
+
+mode: restart
+max_exceeded: silent

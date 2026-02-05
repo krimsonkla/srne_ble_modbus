@@ -1,0 +1,224 @@
+blueprint:
+  name: "SRNE Inverter - Peak Shaving"
+  description: >
+    Reduces grid power import during peak hours by switching to battery power.
+    Helps minimize electricity costs during time-of-use pricing periods.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/peak_shaving.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    grid_power_sensor:
+      name: Grid Power Sensor
+      description: Grid power import sensor (positive = importing from grid)
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    grid_import_threshold:
+      name: Grid Import Threshold
+      description: Switch to battery when grid import exceeds this value (watts)
+      default: 1000
+      selector:
+        number:
+          min: 100
+          max: 10000
+          step: 100
+          unit_of_measurement: "W"
+
+    peak_start_time:
+      name: Peak Hours Start
+      description: When peak pricing begins
+      default: "16:00:00"
+      selector:
+        time:
+
+    peak_end_time:
+      name: Peak Hours End
+      description: When peak pricing ends
+      default: "21:00:00"
+      selector:
+        time:
+
+    minimum_battery_soc:
+      name: Minimum Battery SOC
+      description: Don't discharge battery below this level (protect battery)
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 50
+          step: 5
+          unit_of_measurement: "%"
+
+    priority_select:
+      name: Priority Select Entity
+      description: Energy priority select entity
+      selector:
+        entity:
+          domain: select
+
+    peak_priority_mode:
+      name: Peak Hours Priority
+      description: Priority mode during peak hours
+      default: "Battery First"
+      selector:
+        select:
+          options:
+            - "Battery First"
+            - "Solar First"
+
+    off_peak_priority_mode:
+      name: Off-Peak Priority
+      description: Priority mode to restore after peak hours
+      default: "Solar First"
+      selector:
+        select:
+          options:
+            - "Solar First"
+            - "Utility First"
+            - "Battery First"
+
+    send_notification:
+      name: Send Notification
+      description: Notify when peak shaving is activated/deactivated
+      default: true
+      selector:
+        boolean:
+
+    notification_service:
+      name: Notification Service
+      description: The notification service to use
+      default: ""
+      selector:
+        text:
+
+    hysteresis_duration:
+      name: Hysteresis Duration
+      description: How long grid import must exceed threshold before switching
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          unit_of_measurement: "minutes"
+
+trigger:
+  # Trigger on peak hours start
+  - platform: time
+    at: !input peak_start_time
+    id: "peak_start"
+
+  # Trigger on peak hours end
+  - platform: time
+    at: !input peak_end_time
+    id: "peak_end"
+
+  # Trigger when grid import exceeds threshold during peak hours
+  - platform: numeric_state
+    entity_id: !input grid_power_sensor
+    above: !input grid_import_threshold
+    for:
+      minutes: !input hysteresis_duration
+    id: "high_import"
+
+condition: []
+
+action:
+  - variables:
+      soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      grid_power: "{{ states(grid_power_sensor) | float(0) }}"
+      current_time: "{{ now().strftime('%H:%M:%S') }}"
+      peak_start: !input peak_start_time
+      peak_end: !input peak_end_time
+      is_peak_hours: "{{ peak_start <= current_time < peak_end }}"
+
+  - choose:
+      # Peak hours started or high import during peak
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "peak_start"
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: "high_import"
+                  - condition: template
+                    value_template: "{{ is_peak_hours }}"
+          # Only switch if battery has sufficient charge
+          - condition: numeric_state
+            entity_id: !input battery_soc_sensor
+            above: !input minimum_battery_soc
+        sequence:
+          # Switch to battery priority
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input peak_priority_mode
+
+          # Send notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ send_notification }}"
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "Peak Shaving Activated"
+                      message: >
+                        Switched to {{ peak_priority_mode }} during peak hours.
+                        Battery: {{ soc }}%, Grid import: {{ grid_power }}W
+                      data:
+                        tag: "srne_peak_shaving"
+
+      # Peak hours ended
+      - conditions:
+          - condition: trigger
+            id: "peak_end"
+        sequence:
+          # Restore off-peak priority
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input off_peak_priority_mode
+
+          # Send notification
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ send_notification }}"
+                  - condition: template
+                    value_template: "{{ notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "Peak Shaving Deactivated"
+                      message: >
+                        Peak hours ended. Restored {{ off_peak_priority_mode }} priority.
+                      data:
+                        tag: "srne_peak_shaving"
+
+mode: single
+max_exceeded: silent

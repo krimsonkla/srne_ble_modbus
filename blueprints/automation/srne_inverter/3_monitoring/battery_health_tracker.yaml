@@ -1,0 +1,567 @@
+blueprint:
+  name: "SRNE Inverter - Battery Health Tracker"
+  description: >
+    Comprehensive battery health monitoring system that performs weekly health checks, tracks
+    charge/discharge cycles, monitors capacity degradation, and predicts end-of-life (EOL) based
+    on usage patterns. Provides actionable recommendations for battery maintenance and alerts
+    when battery performance degrades below acceptable thresholds.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/3_monitoring/battery_health_tracker.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    battery_voltage_sensor:
+      name: Battery Voltage Sensor
+      description: Battery voltage sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: voltage
+
+    battery_current_sensor:
+      name: Battery Current Sensor
+      description: Battery current sensor (positive = charging, negative = discharging)
+      selector:
+        entity:
+          domain: sensor
+          device_class: current
+
+    battery_temp_sensor:
+      name: Battery Temperature Sensor
+      description: Battery temperature sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    battery_power_sensor:
+      name: Battery Power Sensor (Optional)
+      description: Battery power sensor for energy calculations
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    # Battery specifications
+    battery_type:
+      name: Battery Type
+      description: Type of battery for health calculations
+      default: "Lithium"
+      selector:
+        select:
+          options:
+            - "Lithium"
+            - "LiFePO4"
+            - "Lead-Acid"
+            - "AGM"
+            - "GEL"
+
+    battery_rated_capacity:
+      name: Battery Rated Capacity
+      description: Original battery capacity (Ah)
+      default: 200
+      selector:
+        number:
+          min: 50
+          max: 1000
+          step: 10
+          unit_of_measurement: "Ah"
+
+    battery_nominal_voltage:
+      name: Battery Nominal Voltage
+      description: Battery nominal voltage (V)
+      default: 48.0
+      selector:
+        number:
+          min: 12.0
+          max: 96.0
+          step: 0.1
+          unit_of_measurement: "V"
+
+    battery_install_date:
+      name: Battery Installation Date (Optional)
+      description: Date when battery was installed (YYYY-MM-DD)
+      default: ""
+      selector:
+        text:
+
+    # Cycle tracking
+    cycle_depth_threshold:
+      name: Cycle Depth Threshold
+      description: Minimum depth of discharge to count as a cycle (%)
+      default: 20
+      selector:
+        number:
+          min: 10
+          max: 50
+          step: 5
+          unit_of_measurement: "%"
+
+    expected_cycle_life:
+      name: Expected Cycle Life
+      description: Expected number of cycles for battery type
+      default: 6000
+      selector:
+        number:
+          min: 1000
+          max: 10000
+          step: 500
+
+    # Health check schedule
+    health_check_day:
+      name: Health Check Day
+      description: Day of week for health check (1=Monday, 7=Sunday)
+      default: 7
+      selector:
+        number:
+          min: 1
+          max: 7
+          step: 1
+          mode: slider
+
+    health_check_time:
+      name: Health Check Time
+      description: Time to perform weekly health check
+      default: "06:00:00"
+      selector:
+        time:
+
+    # Health thresholds
+    capacity_warning_threshold:
+      name: Capacity Warning Threshold
+      description: Warn when capacity drops below this percentage of rated (%)
+      default: 80
+      selector:
+        number:
+          min: 60
+          max: 90
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    capacity_critical_threshold:
+      name: Capacity Critical Threshold
+      description: Critical alert when capacity drops below this (%)
+      default: 70
+      selector:
+        number:
+          min: 50
+          max: 80
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    voltage_drift_threshold:
+      name: Voltage Drift Threshold
+      description: Maximum acceptable voltage drift at 50% SOC (V)
+      default: 1.0
+      selector:
+        number:
+          min: 0.5
+          max: 3.0
+          step: 0.1
+          unit_of_measurement: "V"
+
+    temp_variation_threshold:
+      name: Temperature Variation Threshold
+      description: Maximum acceptable cell temperature variation (°C)
+      default: 5.0
+      selector:
+        number:
+          min: 2.0
+          max: 10.0
+          step: 0.5
+          unit_of_measurement: "°C"
+
+    # EOL prediction
+    enable_eol_prediction:
+      name: Enable End-of-Life Prediction
+      description: Calculate and report estimated battery EOL
+      default: true
+      selector:
+        boolean:
+
+    eol_warning_months:
+      name: EOL Warning Period
+      description: Warn when estimated EOL is within this many months
+      default: 6
+      selector:
+        number:
+          min: 3
+          max: 24
+          step: 3
+          unit_of_measurement: "months"
+
+    # Maintenance recommendations
+    enable_maintenance_recommendations:
+      name: Enable Maintenance Recommendations
+      description: Provide actionable maintenance recommendations
+      default: true
+      selector:
+        boolean:
+
+    # Notification settings
+    notification_service:
+      name: Notification Service
+      description: Service for health check notifications
+      selector:
+        text:
+
+    notify_weekly:
+      name: Send Weekly Health Report
+      description: Send notification with weekly health summary
+      default: true
+      selector:
+        boolean:
+
+    notify_on_warning:
+      name: Notify on Health Warning
+      description: Send notification when health issues detected
+      default: true
+      selector:
+        boolean:
+
+    notify_on_critical:
+      name: Notify on Critical Health
+      description: Send notification for critical health issues
+      default: true
+      selector:
+        boolean:
+
+    include_detailed_report:
+      name: Include Detailed Report
+      description: Include detailed metrics in notifications
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # Weekly health check
+  - platform: time
+    at: !input health_check_time
+    id: "scheduled_check"
+
+  # Daily cycle count update
+  - platform: time
+    at: "00:00:00"
+    id: "daily_update"
+
+  # Critical voltage deviation
+  - platform: template
+    value_template: >
+      {{ (states(battery_voltage_sensor) | float(48) - battery_nominal_voltage) | abs > (voltage_drift_threshold * 2) }}
+    id: "voltage_critical"
+
+  # Critical temperature
+  - platform: numeric_state
+    entity_id: !input battery_temp_sensor
+    above: 50
+    id: "temp_critical"
+
+condition: []
+
+action:
+  - variables:
+      battery_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      battery_voltage: "{{ states(battery_voltage_sensor) | float(0) }}"
+      battery_current: "{{ states(battery_current_sensor) | float(0) }}"
+      battery_temp: "{{ states(battery_temp_sensor) | float(25) }}"
+      battery_type: !input battery_type
+      rated_capacity: !input battery_rated_capacity
+      nominal_voltage: !input battery_nominal_voltage
+      cycle_threshold: !input cycle_depth_threshold
+      expected_cycles: !input expected_cycle_life
+      capacity_warning: !input capacity_warning_threshold
+      capacity_critical: !input capacity_critical_threshold
+      voltage_drift_max: !input voltage_drift_threshold
+      enable_eol: !input enable_eol_prediction
+      enable_maintenance: !input enable_maintenance_recommendations
+      include_details: !input include_detailed_report
+      current_day: "{{ now().isoweekday() }}"
+      health_check_day: !input health_check_day
+
+  # Calculate battery age if install date provided
+  - variables:
+      battery_age_days: >
+        {% set install = battery_install_date %}
+        {% if install | length > 0 %}
+          {{ (as_timestamp(now()) - as_timestamp(strptime(install, '%Y-%m-%d'))) / 86400 | round(0) }}
+        {% else %}
+          0
+        {% endif %}
+      battery_age_months: "{{ (battery_age_days / 30.44) | round(1) if battery_age_days > 0 else 0 }}"
+
+  # Get cycle count from helper or calculate (requires helper setup)
+  - variables:
+      total_cycles: >
+        {{ state_attr('sensor.battery_cycle_count', 'value') | default(0) | float }}
+      cycle_percentage: >
+        {{ (total_cycles / expected_cycles * 100) | round(1) if expected_cycles > 0 else 0 }}
+
+  # Calculate voltage health at current SOC
+  - variables:
+      expected_voltage: >
+        {% if battery_type in ['Lithium', 'LiFePO4'] %}
+          {% if battery_type == 'LiFePO4' %}
+            {{ nominal_voltage * (1 + (battery_soc - 50) * 0.001) }}
+          {% else %}
+            {{ nominal_voltage * (1 + (battery_soc - 50) * 0.0015) }}
+          {% endif %}
+        {% else %}
+          {{ nominal_voltage * (1 + (battery_soc - 50) * 0.002) }}
+        {% endif %}
+      voltage_drift: "{{ (battery_voltage - expected_voltage) | abs | round(2) }}"
+      voltage_health: >
+        {% if voltage_drift < voltage_drift_max %}
+          good
+        {% elif voltage_drift < (voltage_drift_max * 1.5) %}
+          fair
+        {% else %}
+          poor
+        {% endif %}
+
+  # Estimate current capacity (simplified calculation)
+  - variables:
+      estimated_capacity_percent: >
+        {% set age_factor = 1 - (battery_age_months * 0.003) if battery_age_months > 0 else 1 %}
+        {% set cycle_factor = 1 - (total_cycles * 0.00005) if total_cycles > 0 else 1 %}
+        {% set voltage_factor = 1 - (voltage_drift * 0.1) if voltage_drift > 0 else 1 %}
+        {{ ([age_factor * cycle_factor * voltage_factor, 0.5] | max * 100) | round(1) }}
+      estimated_capacity_ah: >
+        {{ (rated_capacity * estimated_capacity_percent / 100) | round(1) }}
+
+  # Determine overall health status
+  - variables:
+      health_status: >
+        {% if estimated_capacity_percent < capacity_critical or voltage_health == 'poor' %}
+          critical
+        {% elif estimated_capacity_percent < capacity_warning or voltage_health == 'fair' %}
+          warning
+        {% else %}
+          good
+        {% endif %}
+
+  # EOL prediction
+  - variables:
+      estimated_eol_cycles: >
+        {% if enable_eol and total_cycles > 100 %}
+          {% set degradation_rate = (100 - estimated_capacity_percent) / total_cycles %}
+          {% set cycles_to_70_percent = (30 / degradation_rate) if degradation_rate > 0 else 999999 %}
+          {{ (total_cycles + cycles_to_70_percent) | round(0) }}
+        {% else %}
+          {{ expected_cycles }}
+        {% endif %}
+      cycles_remaining: "{{ (estimated_eol_cycles - total_cycles) | round(0) }}"
+      estimated_eol_months: >
+        {% if total_cycles > 0 and battery_age_months > 0 %}
+          {% set cycles_per_month = total_cycles / battery_age_months %}
+          {{ (cycles_remaining / cycles_per_month) | round(0) if cycles_per_month > 0 else 999 }}
+        {% else %}
+          999
+        {% endif %}
+
+  # Maintenance recommendations
+  - variables:
+      recommendations: >
+        {% set recs = [] %}
+        {% if voltage_drift > voltage_drift_max %}
+          {% set recs = recs + ['Cell balancing recommended'] %}
+        {% endif %}
+        {% if battery_temp > 35 %}
+          {% set recs = recs + ['Improve battery cooling'] %}
+        {% endif %}
+        {% if estimated_capacity_percent < 85 %}
+          {% set recs = recs + ['Consider capacity test'] %}
+        {% endif %}
+        {% if cycle_percentage > 80 %}
+          {% set recs = recs + ['Plan for battery replacement'] %}
+        {% endif %}
+        {% if total_cycles > (expected_cycles * 0.9) %}
+          {% set recs = recs + ['Near end of life - monitor closely'] %}
+        {% endif %}
+        {{ recs | join(', ') if recs | length > 0 else 'None - battery health good' }}
+
+  # Execute appropriate action based on trigger
+  - choose:
+      # SCHEDULED HEALTH CHECK
+      - conditions:
+          - condition: trigger
+            id: "scheduled_check"
+          - condition: template
+            value_template: "{{ current_day == health_check_day }}"
+        sequence:
+          # Log health check
+          - service: system_log.write
+            data:
+              message: >
+                Battery Health Check:
+                - Capacity: {{ estimated_capacity_ah }}Ah ({{ estimated_capacity_percent }}%)
+                - Cycles: {{ total_cycles }} ({{ cycle_percentage }}% of expected)
+                - Voltage Health: {{ voltage_health }}
+                - Status: {{ health_status }}
+                {% if enable_eol %}
+                - Estimated EOL: {{ estimated_eol_months }} months
+                {% endif %}
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.battery_health
+
+          # Send notification if enabled
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_weekly and notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "📊 Weekly Battery Health Report"
+                      message: >
+                        Battery Health: {{ health_status | upper }}
+
+                        Capacity: {{ estimated_capacity_ah }}Ah / {{ rated_capacity }}Ah ({{ estimated_capacity_percent }}%)
+                        Cycles: {{ total_cycles | round(0) }} / {{ expected_cycles }} ({{ cycle_percentage }}%)
+                        Age: {{ battery_age_months }} months
+                        {% if enable_eol %}
+                        Estimated EOL: ~{{ estimated_eol_months }} months
+                        {% endif %}
+
+                        {% if include_details %}
+                        Current Status:
+                        - Voltage: {{ battery_voltage }}V ({{ voltage_health }})
+                        - Temperature: {{ battery_temp }}°C
+                        - SOC: {{ battery_soc }}%
+
+                        {% if enable_maintenance and recommendations != 'None - battery health good' %}
+                        Recommendations:
+                        {{ recommendations }}
+                        {% endif %}
+                        {% endif %}
+                      data:
+                        tag: "srne_battery_health"
+
+      # HEALTH WARNING DETECTED
+      - conditions:
+          - condition: template
+            value_template: "{{ health_status == 'warning' }}"
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "scheduled_check"
+              - condition: trigger
+                id: "daily_update"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_warning and notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "⚠️ Battery Health Warning"
+                      message: >
+                        Battery health degraded
+
+                        Capacity: {{ estimated_capacity_percent }}% of rated
+                        {% if estimated_capacity_percent < capacity_warning %}
+                        (Below {{ capacity_warning }}% threshold)
+                        {% endif %}
+
+                        Voltage Drift: {{ voltage_drift }}V
+                        Cycles: {{ total_cycles }} ({{ cycle_percentage }}%)
+
+                        {% if enable_maintenance %}
+                        Recommendations:
+                        {{ recommendations }}
+                        {% endif %}
+                      data:
+                        priority: high
+                        tag: "srne_battery_health"
+
+      # CRITICAL HEALTH ISSUE
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: template
+                value_template: "{{ health_status == 'critical' }}"
+              - condition: trigger
+                id: "voltage_critical"
+              - condition: trigger
+                id: "temp_critical"
+        sequence:
+          - service: system_log.write
+            data:
+              message: >
+                CRITICAL: Battery health critical
+                Capacity: {{ estimated_capacity_percent }}%, Voltage: {{ battery_voltage }}V, Temp: {{ battery_temp }}°C
+              level: critical
+              logger: homeassistant.components.srne_ble_modbus.battery_health
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_on_critical and notification_service | length > 0 }}"
+                sequence:
+                  - service: !input notification_service
+                    data:
+                      title: "🚨 CRITICAL: Battery Health"
+                      message: >
+                        ⚠️ CRITICAL BATTERY HEALTH ISSUE ⚠️
+
+                        {% if trigger.id == 'voltage_critical' %}
+                        Voltage deviation critical: {{ voltage_drift }}V
+                        {% elif trigger.id == 'temp_critical' %}
+                        Temperature critical: {{ battery_temp }}°C
+                        {% else %}
+                        Capacity critical: {{ estimated_capacity_percent }}%
+                        {% endif %}
+
+                        Current Status:
+                        - Capacity: {{ estimated_capacity_ah }}Ah ({{ estimated_capacity_percent }}%)
+                        - Voltage: {{ battery_voltage }}V (drift: {{ voltage_drift }}V)
+                        - Temperature: {{ battery_temp }}°C
+                        - Cycles: {{ total_cycles }}
+
+                        {% if enable_maintenance %}
+                        IMMEDIATE ACTION REQUIRED:
+                        {{ recommendations }}
+                        {% endif %}
+
+                        {% if estimated_eol_months < eol_warning_months %}
+                        ⚠️ Battery approaching end of life ({{ estimated_eol_months }} months)
+                        {% endif %}
+                      data:
+                        priority: high
+                        ttl: 0
+                        sticky: true
+                        tag: "srne_battery_health"
+
+      # DAILY CYCLE UPDATE
+      - conditions:
+          - condition: trigger
+            id: "daily_update"
+        sequence:
+          - service: system_log.write
+            data:
+              message: >
+                Battery Health: Daily update
+                Cycles: {{ total_cycles }}, Capacity: {{ estimated_capacity_percent }}%
+              level: debug
+              logger: homeassistant.components.srne_ble_modbus.battery_health
+
+mode: queued
+max: 3

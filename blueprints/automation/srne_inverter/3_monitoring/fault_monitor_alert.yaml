@@ -1,0 +1,590 @@
+blueprint:
+  name: "SRNE Inverter - Fault Monitor and Alert"
+  description: >
+    Comprehensive fault monitoring system that detects, alerts, logs, and attempts automatic recovery
+    from inverter faults. Tracks fault history, implements intelligent restart logic with exponential
+    backoff, differentiates between critical and recoverable faults, and provides detailed
+    notifications through multiple channels. Enhanced version of the basic fault response blueprint.
+  domain: automation
+  author: "SRNE Inverter Integration"
+  source_url: https://github.com/krimsonkla/srne_ble_modbus/blueprints/automation/srne_inverter/3_monitoring/fault_monitor_alert.yaml
+
+  input:
+    inverter_device:
+      name: SRNE Inverter Device
+      description: Select your SRNE Inverter device
+      selector:
+        device:
+          integration: srne_ble_modbus
+
+    fault_sensor:
+      name: Fault Detection Sensor
+      description: Binary sensor that indicates fault status
+      selector:
+        entity:
+          domain: binary_sensor
+
+    fault_code_sensor:
+      name: Fault Code Sensor (Optional)
+      description: Sensor showing the specific fault code
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+
+    priority_select:
+      name: Energy Priority Select
+      description: Energy priority select entity
+      selector:
+        entity:
+          domain: select
+
+    battery_soc_sensor:
+      name: Battery SOC Sensor
+      description: Battery State of Charge sensor for context
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    battery_voltage_sensor:
+      name: Battery Voltage Sensor
+      description: Battery voltage sensor for diagnostics
+      selector:
+        entity:
+          domain: sensor
+          device_class: voltage
+
+    battery_temp_sensor:
+      name: Battery Temperature Sensor (Optional)
+      description: Battery temperature for fault context
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    load_power_sensor:
+      name: Load Power Sensor (Optional)
+      description: Load power sensor for fault context
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    # Fault response settings
+    safe_mode_priority:
+      name: Safe Mode Priority
+      description: Priority to switch to when fault occurs
+      default: "Utility First"
+      selector:
+        select:
+          options:
+            - "Utility First"
+            - "Solar First"
+            - "Battery First"
+
+    critical_fault_codes:
+      name: Critical Fault Codes
+      description: Comma-separated list of critical fault codes (require manual intervention)
+      default: "E01,E02,E03,E13,E14,E15"
+      selector:
+        text:
+
+    # Auto-restart settings
+    enable_auto_restart:
+      name: Enable Automatic Restart
+      description: Automatically attempt to restart inverter on recoverable faults
+      default: true
+      selector:
+        boolean:
+
+    max_restart_attempts:
+      name: Maximum Restart Attempts
+      description: Maximum number of restart attempts before giving up
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+
+    restart_delay_initial:
+      name: Initial Restart Delay
+      description: Wait time before first restart attempt (seconds)
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 300
+          step: 10
+          unit_of_measurement: "s"
+
+    restart_delay_increment:
+      name: Restart Delay Increment
+      description: Additional delay for each subsequent attempt (exponential backoff, seconds)
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 300
+          step: 10
+          unit_of_measurement: "s"
+
+    attempt_reset_time:
+      name: Attempt Counter Reset Time
+      description: Reset attempt counter after successful operation (minutes)
+      default: 60
+      selector:
+        number:
+          min: 30
+          max: 240
+          step: 30
+          unit_of_measurement: "minutes"
+
+    # Fault history logging
+    enable_fault_logging:
+      name: Enable Fault History Logging
+      description: Log faults to persistent storage for analysis
+      default: true
+      selector:
+        boolean:
+
+    log_file_path:
+      name: Log File Path (Optional)
+      description: Path to fault log file (leave empty for system log only)
+      default: ""
+      selector:
+        text:
+
+    # Notification settings
+    notification_service_1:
+      name: Primary Notification Service
+      description: First notification service (e.g., mobile app)
+      selector:
+        text:
+
+    notification_service_2:
+      name: Secondary Notification Service (Optional)
+      description: Second notification service for redundancy
+      default: ""
+      selector:
+        text:
+
+    notification_service_3:
+      name: Email Notification Service (Optional)
+      description: Third notification service (e.g., email for critical faults)
+      default: ""
+      selector:
+        text:
+
+    notification_repeat_enabled:
+      name: Enable Repeat Notifications
+      description: Re-send notification if fault persists
+      default: true
+      selector:
+        boolean:
+
+    notification_repeat_interval:
+      name: Notification Repeat Interval
+      description: Re-send notification if fault persists (minutes)
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 120
+          step: 10
+          unit_of_measurement: "minutes"
+
+    # Alert escalation
+    enable_escalation:
+      name: Enable Alert Escalation
+      description: Escalate alerts after multiple failed recovery attempts
+      default: true
+      selector:
+        boolean:
+
+    escalation_threshold:
+      name: Escalation Threshold
+      description: Number of failed attempts before escalating
+      default: 3
+      selector:
+        number:
+          min: 2
+          max: 5
+          step: 1
+
+    # Diagnostic data collection
+    include_diagnostic_data:
+      name: Include Diagnostic Data
+      description: Include detailed system state in notifications
+      default: true
+      selector:
+        boolean:
+
+trigger:
+  # Fault detected
+  - platform: state
+    entity_id: !input fault_sensor
+    to: "on"
+    id: "fault_on"
+
+  # Fault cleared
+  - platform: state
+    entity_id: !input fault_sensor
+    to: "off"
+    id: "fault_off"
+
+  # Repeat notification if fault persists
+  - platform: state
+    entity_id: !input fault_sensor
+    to: "on"
+    for:
+      minutes: !input notification_repeat_interval
+    id: "fault_persist"
+
+  # Periodic health check
+  - platform: time_pattern
+    minutes: "/15"
+    id: "health_check"
+
+condition: []
+
+action:
+  - variables:
+      fault_code: >
+        {% if fault_code_sensor is defined and fault_code_sensor != none %}
+          {{ states(fault_code_sensor) }}
+        {% else %}
+          Unknown
+        {% endif %}
+      battery_soc: "{{ states(battery_soc_sensor) | float(0) }}"
+      battery_voltage: "{{ states(battery_voltage_sensor) | float(0) }}"
+      battery_temp: >
+        {% if battery_temp_sensor is defined and battery_temp_sensor != none %}
+          {{ states(battery_temp_sensor) | float(25) }}
+        {% else %}
+          N/A
+        {% endif %}
+      load_power: >
+        {% if load_power_sensor is defined and load_power_sensor != none %}
+          {{ states(load_power_sensor) | float(0) }}
+        {% else %}
+          N/A
+        {% endif %}
+      timestamp: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      critical_codes: !input critical_fault_codes
+      enable_auto_restart: !input enable_auto_restart
+      enable_escalation: !input enable_escalation
+      enable_logging: !input enable_fault_logging
+      include_diagnostics: !input include_diagnostic_data
+
+  # Determine if fault is critical
+  - variables:
+      is_critical_fault: >
+        {{ fault_code in critical_codes.split(',') }}
+
+      diagnostic_data: >
+        {% if include_diagnostics %}
+
+        Diagnostic Data:
+        - Battery SOC: {{ battery_soc }}%
+        - Battery Voltage: {{ battery_voltage }}V
+        {% if battery_temp != 'N/A' %}
+        - Battery Temperature: {{ battery_temp }}°C
+        {% endif %}
+        {% if load_power != 'N/A' %}
+        - Load Power: {{ load_power | round(0) }}W
+        {% endif %}
+        - Priority Mode: {{ states(priority_select) }}
+        - Timestamp: {{ timestamp }}
+        {% else %}
+        {% endif %}
+
+  - choose:
+      # FAULT DETECTED OR PERSISTING
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "fault_on"
+              - condition: trigger
+                id: "fault_persist"
+        sequence:
+          # Switch to safe mode
+          - service: select.select_option
+            target:
+              entity_id: !input priority_select
+            data:
+              option: !input safe_mode_priority
+
+          # Log fault to system
+          - service: system_log.write
+            data:
+              message: >
+                FAULT DETECTED: Code {{ fault_code }}{{ diagnostic_data }}
+              level: error
+              logger: homeassistant.components.srne_ble_modbus.fault_monitor
+
+          # Log to file if enabled
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_logging and log_file_path | length > 0 }}"
+                sequence:
+                  - service: notify.persistent_notification
+                    data:
+                      title: "Fault Logged"
+                      message: >
+                        Fault {{ fault_code }} logged at {{ timestamp }}
+                        See {{ log_file_path }} for details.
+
+          # Determine notification urgency
+          - variables:
+              notification_priority: >
+                {% if is_critical_fault or trigger.id == 'fault_persist' %}
+                  high
+                {% else %}
+                  normal
+                {% endif %}
+
+              notification_title: >
+                {% if is_critical_fault %}
+                  🚨 CRITICAL INVERTER FAULT
+                {% elif trigger.id == 'fault_persist' %}
+                  ⚠️ PERSISTENT INVERTER FAULT
+                {% else %}
+                  ⚠️ INVERTER FAULT DETECTED
+                {% endif %}
+
+              notification_message: >
+                Fault detected at {{ timestamp }}
+
+                Fault Code: {{ fault_code }}
+                {% if is_critical_fault %}
+                ⚠️ CRITICAL FAULT - Manual intervention required!
+                {% endif %}
+                {{ diagnostic_data }}
+
+                Actions taken:
+                - Switched to {{ safe_mode_priority }}
+                {% if enable_auto_restart and not is_critical_fault %}
+                - Auto-restart will be attempted in {{ restart_delay_initial }}s
+                {% else %}
+                - Manual intervention required
+                {% endif %}
+
+          # Send primary notification
+          - service: !input notification_service_1
+            data:
+              title: "{{ notification_title }}"
+              message: "{{ notification_message }}"
+              data:
+                priority: "{{ notification_priority }}"
+                ttl: 0
+                tag: "srne_fault_monitor"
+                sticky: "{{ is_critical_fault }}"
+
+          # Send secondary notifications
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service_2 | length > 0 }}"
+                sequence:
+                  - service: !input notification_service_2
+                    data:
+                      title: "{{ notification_title }}"
+                      message: >
+                        Fault code {{ fault_code }} at {{ timestamp }}
+                        {% if is_critical_fault %}CRITICAL - {% endif %}Check Home Assistant immediately!
+                      data:
+                        priority: "{{ notification_priority }}"
+
+          # Email for critical faults
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notification_service_3 | length > 0 and is_critical_fault }}"
+                sequence:
+                  - service: !input notification_service_3
+                    data:
+                      title: "CRITICAL: SRNE Inverter Fault {{ fault_code }}"
+                      message: "{{ notification_message }}"
+
+          # Auto-restart logic (for non-critical faults)
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_auto_restart and not is_critical_fault }}"
+                  - condition: trigger
+                    id: "fault_on"
+                sequence:
+                  # Get attempt counter (using helper or state)
+                  - variables:
+                      current_attempts: >
+                        {{ state_attr('automation.srne_fault_monitor', 'restart_attempts') | default(0) | int }}
+                      max_attempts: !input max_restart_attempts
+                      can_restart: "{{ current_attempts < max_attempts }}"
+
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ can_restart }}"
+                        sequence:
+                          # Calculate delay with exponential backoff
+                          - variables:
+                              restart_delay: "{{ restart_delay_initial + (restart_delay_increment * current_attempts) }}"
+
+                          # Wait before restart
+                          - delay:
+                              seconds: "{{ restart_delay }}"
+
+                          # Check if fault still exists
+                          - condition: state
+                            entity_id: !input fault_sensor
+                            state: "on"
+
+                          # Attempt restart
+                          - service: srne_ble_modbus.restart_inverter
+                            target:
+                              device_id: !input inverter_device
+                            data:
+                              confirm: true
+
+                          - service: system_log.write
+                            data:
+                              message: >
+                                Fault Monitor: Restart attempt {{ current_attempts + 1 }}/{{ max_attempts }}
+                                Fault code: {{ fault_code }}
+                              level: warning
+                              logger: homeassistant.components.srne_ble_modbus.fault_monitor
+
+                          - service: !input notification_service_1
+                            data:
+                              title: "🔄 Inverter Restart Attempted"
+                              message: >
+                                Automatic restart initiated
+                                Attempt {{ current_attempts + 1 }} of {{ max_attempts }}
+                                Fault code: {{ fault_code }}
+                              data:
+                                tag: "srne_fault_restart"
+
+                      # Max attempts reached
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ not can_restart }}"
+                        sequence:
+                          - service: system_log.write
+                            data:
+                              message: >
+                                Fault Monitor: Maximum restart attempts reached ({{ max_attempts }})
+                                Manual intervention required
+                              level: critical
+                              logger: homeassistant.components.srne_ble_modbus.fault_monitor
+
+                          # Escalation notification
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: "{{ enable_escalation }}"
+                                sequence:
+                                  - service: !input notification_service_1
+                                    data:
+                                      title: "🚨 ESCALATION: Inverter Recovery Failed"
+                                      message: >
+                                        ⚠️ URGENT: Manual intervention required! ⚠️
+
+                                        Fault code {{ fault_code }} persists after {{ max_attempts }} restart attempts.
+                                        {{ diagnostic_data }}
+
+                                        System in safe mode. Check inverter immediately!
+                                      data:
+                                        priority: high
+                                        ttl: 0
+                                        sticky: true
+
+                                  - choose:
+                                      - conditions:
+                                          - condition: template
+                                            value_template: "{{ notification_service_3 | length > 0 }}"
+                                        sequence:
+                                          - service: !input notification_service_3
+                                            data:
+                                              title: "URGENT: SRNE Inverter Recovery Failed"
+                                              message: "{{ max_attempts }} restart attempts failed. Manual intervention required immediately."
+
+      # FAULT CLEARED
+      - conditions:
+          - condition: trigger
+            id: "fault_off"
+        sequence:
+          # Calculate uptime since fault cleared
+          - variables:
+              fault_duration: >
+                {% set start = state_attr(fault_sensor, 'last_changed') %}
+                {% if start %}
+                  {{ ((as_timestamp(now()) - as_timestamp(start)) / 60) | round(0) }}
+                {% else %}
+                  unknown
+                {% endif %}
+
+          # Log recovery
+          - service: system_log.write
+            data:
+              message: >
+                Fault Monitor: Fault cleared
+                Previous fault code: {{ fault_code }}
+                Fault duration: {{ fault_duration }} minutes
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.fault_monitor
+
+          # Notify fault cleared
+          - service: !input notification_service_1
+            data:
+              title: "✅ Inverter Fault Cleared"
+              message: >
+                Fault cleared at {{ timestamp }}
+                Previous fault: {{ fault_code }}
+                Duration: {{ fault_duration }} minutes
+
+                System operating normally.
+              data:
+                tag: "srne_fault_monitor"
+
+          # Reset attempt counter (after successful operation period)
+          - delay:
+              minutes: !input attempt_reset_time
+
+          - condition: state
+            entity_id: !input fault_sensor
+            state: "off"
+
+          - service: system_log.write
+            data:
+              message: "Fault Monitor: Restart attempt counter reset after successful operation"
+              level: info
+              logger: homeassistant.components.srne_ble_modbus.fault_monitor
+
+      # HEALTH CHECK
+      - conditions:
+          - condition: trigger
+            id: "health_check"
+        sequence:
+          # Log periodic health status
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: !input fault_sensor
+                    state: "off"
+                sequence:
+                  - service: system_log.write
+                    data:
+                      message: >
+                        Fault Monitor: Health check OK
+                        Battery: {{ battery_soc }}% / {{ battery_voltage }}V
+                      level: debug
+                      logger: homeassistant.components.srne_ble_modbus.fault_monitor
+
+mode: queued
+max: 10
