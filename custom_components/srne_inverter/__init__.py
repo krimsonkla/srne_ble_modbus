@@ -26,6 +26,7 @@ from homeassistant.helpers import entity_registry as er
 import homeassistant.helpers.config_validation as cv
 
 from .config_loader import load_entity_config
+from .entity_manager import async_get_entity_manager
 from .const import DOMAIN
 from .coordinator import SRNEDataUpdateCoordinator
 
@@ -152,6 +153,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             device_config.get("device", {}).get("model"),
             device_config.get("device", {}).get("protocol_version"),
         )
+
+        # Update entity manager with device config
+        entity_manager = async_get_entity_manager(hass)
+        entity_manager.set_device_config(entry.entry_id, device_config)
     except Exception as err:
         _LOGGER.error("Failed to load device configuration: %s", err)
         raise ConfigEntryNotReady(
@@ -171,9 +176,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.error("Failed to connect to SRNE inverter: %s", err)
         raise ConfigEntryNotReady(f"Failed to connect to inverter: {err}") from err
 
-    # Store coordinator
+    # Store coordinator and config
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data[DOMAIN][entry.entry_id] = {
+        "coordinator": coordinator,
+        "config": device_config,
+    }
 
     # Forward setup to platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -184,13 +192,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register services
     async def handle_force_refresh(call: ServiceCall) -> None:
         """Handle force refresh service call."""
-        coordinator = hass.data[DOMAIN][entry.entry_id]
+        data = hass.data[DOMAIN][entry.entry_id]
+        coordinator = data["coordinator"]
         await coordinator.async_request_refresh()
         _LOGGER.info("Force refresh triggered for SRNE inverter")
 
     async def handle_reset_statistics(call: ServiceCall) -> None:
         """Handle reset statistics service call."""
-        coordinator = hass.data[DOMAIN][entry.entry_id]
+        data = hass.data[DOMAIN][entry.entry_id]
+        coordinator = data["coordinator"]
 
         # Reset diagnostic counters (NOT inverter statistics)
         coordinator._failed_reads = 0
@@ -206,7 +216,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not call.data.get("confirm", False):
             raise ValueError("Restart requires confirmation parameter set to true")
 
-        coordinator = hass.data[DOMAIN][entry.entry_id]
+        data = hass.data[DOMAIN][entry.entry_id]
+        coordinator = data["coordinator"]
 
         _LOGGER.debug(
             "Inverter restart requested - writing to CmdMachineReset register"
@@ -223,7 +234,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def handle_hide_unsupported(call: ServiceCall) -> None:
         """Handle hide unsupported entities service call."""
-        coordinator = hass.data[DOMAIN][entry.entry_id]
+        data = hass.data[DOMAIN][entry.entry_id]
+        coordinator = data["coordinator"]
 
         # Disable entities with failed registers
         disabled_count = await _hide_failed_entities(hass, entry, coordinator)

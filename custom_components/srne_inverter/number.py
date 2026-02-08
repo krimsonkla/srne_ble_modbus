@@ -19,7 +19,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .coordinator import SRNEDataUpdateCoordinator
 from .entity_factory import EntityFactory
-from .config_loader import load_entity_config
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,11 +34,12 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up SRNE Inverter number entities from a config entry."""
-    coordinator: SRNEDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator: SRNEDataUpdateCoordinator = data["coordinator"]
+    config = data["config"]
 
-    # Load configurable entities from YAML
+    # Load configurable entities from config
     try:
-        config = await load_entity_config(hass, entry, "entities_pilot.yaml")
         entities = EntityFactory.create_entities_from_config(
             coordinator, entry, config, "numbers"
         )

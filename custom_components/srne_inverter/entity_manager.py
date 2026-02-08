@@ -23,92 +23,6 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}.entity_preferences"
 
-# Entity category mappings based on the YAML configurations
-ENTITY_CATEGORIES = {
-    "configurable_numbers": [
-        "max_ac_charge_current",
-        "max_charge_current",
-        "float_charge_voltage",
-        "bulk_charge_voltage",
-        "battery_low_voltage",
-        "battery_shutdown_voltage",
-        "grid_charge_start_voltage",
-        "pv_power_balance",
-    ],
-    "configurable_selects": [
-        "energy_priority",
-        "output_priority",
-        "charge_source_priority",
-        "battery_type",
-        "ac_input_range",
-    ],
-    "diagnostic_sensors": [
-        "update_duration",
-        "failed_reads_count",
-        "last_update",
-        "ble_connection_quality",
-        "success_rate",
-        "system_datetime",
-        "grid_on_countdown",
-        "total_bus_voltage",
-        "transformer_temperature",
-        "ambient_temperature",
-        "charge_power_total",
-        "load_current",
-        "battery_cycle_count",
-        "battery_charge_rate",
-        "battery_discharge_rate",
-        "thermal_stress_indicator",
-        "system_health_score",
-    ],
-    "calculated_sensors": [
-        "grid_import_power",
-        "grid_export_power",
-        "battery_power",
-        "battery_charge_power",
-        "battery_discharge_power",
-        "self_sufficiency",
-        "grid_dependency",
-        "system_efficiency",
-        "battery_time_to_full",
-        "battery_time_to_empty",
-        "energy_flow_balance",
-        "pv_utilization_rate",
-        "battery_contribution_rate",
-        "daily_solar_value",
-        "round_trip_efficiency",
-        "pv_to_load_direct_ratio",
-        "daily_battery_throughput",
-    ],
-    "3phase_sensors": [
-        "grid_voltage_b",
-        "grid_voltage_c",
-        "grid_current_b",
-        "grid_current_c",
-        "grid_power_b",
-        "grid_power_c",
-        "inverter_voltage_b",
-        "inverter_voltage_c",
-        "inverter_current_b",
-        "inverter_current_c",
-        "load_current_b",
-        "load_current_c",
-        "load_power_b",
-        "load_power_c",
-        "load_power_b_home",
-        "load_power_c_home",
-    ],
-    "split_phase_sensors": [
-        "positive_bus_voltage",
-        "negative_bus_voltage",
-    ],
-    "dual_pv_sensors": [
-        "pv2_voltage",
-        "pv2_current",
-        "pv2_power",
-    ],
-}
-
 
 class EntityManager:
     """Manage entity registry operations for SRNE Inverter entities."""
@@ -123,6 +37,21 @@ class EntityManager:
         self._entity_registry = er.async_get(hass)
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._preferences: dict[str, dict[str, bool]] = {}
+        self._device_configs: dict[str, dict[str, Any]] = {}
+
+    def set_device_config(self, config_entry_id: str, config: dict[str, Any]) -> None:
+        """Set the device configuration for a specific config entry.
+
+        Args:
+            config_entry_id: Config entry ID
+            config: Device configuration dictionary
+        """
+        self._device_configs[config_entry_id] = config
+        _LOGGER.debug("Set device config for entry %s", config_entry_id)
+
+    def _get_config_for_entry(self, config_entry_id: str) -> dict[str, Any] | None:
+        """Get the device configuration for a specific config entry."""
+        return self._device_configs.get(config_entry_id)
 
     async def async_load(self) -> None:
         """Load entity preferences from storage."""
@@ -156,16 +85,7 @@ class EntityManager:
 
         Returns:
             List of entity IDs that were enabled
-
-        Raises:
-            ValueError: If category is invalid
         """
-        if category not in ENTITY_CATEGORIES:
-            raise ValueError(
-                f"Invalid category: {category}. "
-                f"Valid categories: {', '.join(ENTITY_CATEGORIES.keys())}"
-            )
-
         entity_ids = self._get_entity_ids_for_category(config_entry_id, category)
         enabled = await self.enable_specific_entities(entity_ids)
 
@@ -195,16 +115,7 @@ class EntityManager:
 
         Returns:
             List of entity IDs that were disabled
-
-        Raises:
-            ValueError: If category is invalid
         """
-        if category not in ENTITY_CATEGORIES:
-            raise ValueError(
-                f"Invalid category: {category}. "
-                f"Valid categories: {', '.join(ENTITY_CATEGORIES.keys())}"
-            )
-
         entity_ids = self._get_entity_ids_for_category(config_entry_id, category)
         disabled = await self.disable_specific_entities(entity_ids)
 
@@ -231,29 +142,45 @@ class EntityManager:
             config_entry_id: Config entry ID
 
         Returns:
-            Dict mapping category to status info:
-            {
-                "category_name": {
-                    "enabled_count": 5,
-                    "disabled_count": 2,
-                    "total_count": 7,
-                    "entities": [list of entity details]
-                }
-            }
+            Dict mapping category to status info
         """
         status: dict[str, dict[str, Any]] = {}
+        config = self._get_config_for_entry(config_entry_id)
 
-        for category, entity_keys in ENTITY_CATEGORIES.items():
+        if not config:
+            return status
+
+        # Identify unique categories in the config
+        categories = set()
+        for entity_type in ["sensors", "switches", "selects", "binary_sensors", "numbers"]:
+            for entity in config.get(entity_type, []):
+                if cat := entity.get("entity_category"):
+                    categories.add(cat)
+
+        # Add legacy groupings if they contain entities
+        for legacy_cat in [
+            "configurable_numbers",
+            "configurable_selects",
+            "diagnostic_sensors",
+            "calculated_sensors",
+            "3phase_sensors",
+            "split_phase_sensors",
+            "dual_pv_sensors",
+        ]:
+            if self._get_entity_ids_for_category(config_entry_id, legacy_cat):
+                categories.add(legacy_cat)
+
+        for category in categories:
+            entity_ids = self._get_entity_ids_for_category(config_entry_id, category)
             enabled_count = 0
             disabled_count = 0
             entities = []
 
-            for entity_key in entity_keys:
-                entity_id = self._build_entity_id(config_entry_id, entity_key)
-                entity = self._entity_registry.async_get(entity_id)
+            for entity_id in entity_ids:
+                registry_entry = self._entity_registry.async_get(entity_id)
 
-                if entity:
-                    is_enabled = entity.disabled_by is None
+                if registry_entry:
+                    is_enabled = registry_entry.disabled_by is None
                     if is_enabled:
                         enabled_count += 1
                     else:
@@ -262,9 +189,9 @@ class EntityManager:
                     entities.append(
                         {
                             "entity_id": entity_id,
-                            "name": entity.name or entity.original_name,
+                            "name": registry_entry.name or registry_entry.original_name,
                             "enabled": is_enabled,
-                            "disabled_by": entity.disabled_by,
+                            "disabled_by": registry_entry.disabled_by,
                         }
                     )
 
@@ -329,10 +256,6 @@ class EntityManager:
         preferences = self._preferences[config_entry_id]
 
         for category, is_enabled in preferences.items():
-            if category not in ENTITY_CATEGORIES:
-                _LOGGER.debug("Unknown category in preferences: %s", category)
-                continue
-
             if is_enabled:
                 entities = await self.enable_entity_category(config_entry_id, category)
                 enabled_count += len(entities)
@@ -365,7 +288,55 @@ class EntityManager:
         Returns:
             List of full entity IDs
         """
-        entity_keys = ENTITY_CATEGORIES.get(category, [])
+        config = self._get_config_for_entry(config_entry_id)
+        if not config:
+            _LOGGER.warning("No device config found for entry %s", config_entry_id)
+            return []
+
+        entity_keys = []
+
+        # Traditional Home Assistant entity categories (config, diagnostic)
+        # and our custom groupings (3phase_sensors, etc.)
+        for entity_type in ["sensors", "switches", "selects", "binary_sensors", "numbers"]:
+            for entity in config.get(entity_type, []):
+                entity_id = entity.get("entity_id")
+                if not entity_id:
+                    continue
+
+                # Check if matches entity_category field
+                # e.g., category='diagnostic' matches entity_category='diagnostic'
+                if entity.get("entity_category") == category:
+                    entity_keys.append(entity_id)
+                    continue
+
+                # Support older grouping names from ENTITY_CATEGORIES
+                # mapping them to new configuration-driven logic
+                if category == "diagnostic_sensors" and entity.get("entity_category") == "diagnostic":
+                    entity_keys.append(entity_id)
+                    continue
+                if category == "configurable_numbers" and entity_type == "numbers":
+                    entity_keys.append(entity_id)
+                    continue
+                if category == "configurable_selects" and entity_type == "selects":
+                    entity_keys.append(entity_id)
+                    continue
+                if category == "calculated_sensors" and entity.get("source_type") == "calculated":
+                    entity_keys.append(entity_id)
+                    continue
+
+                # Check for feature-based groupings
+                if "_b" in entity_id or "_c" in entity_id or "phase_b" in entity_id or "phase_c" in entity_id:
+                    entity_keys.append(entity_id)
+                elif category == "split_phase_sensors" and (
+                    "bus_voltage" in entity_id and ("positive" in entity_id or "negative" in entity_id)
+                ):
+                    entity_keys.append(entity_id)
+                elif category == "dual_pv_sensors" and "pv2_" in entity_id:
+                    entity_keys.append(entity_id)
+
+        # Remove duplicates
+        entity_keys = list(set(entity_keys))
+
         return [
             self._build_entity_id(config_entry_id, entity_key)
             for entity_key in entity_keys
@@ -382,45 +353,57 @@ class EntityManager:
             Full entity ID (e.g., 'sensor.srne_inverter_battery_soc')
         """
         # Determine platform based on category
-        platform = self._get_platform_for_entity(entity_key)
-
-        # Get the config entry to extract device name
-        config_entry = self._hass.config_entries.async_get_entry(config_entry_id)
-        if not config_entry:
-            _LOGGER.debug(
-                "Config entry %s not found for entity %s",
-                config_entry_id,
-                entity_key,
-            )
-            # Fallback to generic name
-            return f"{platform}.{DOMAIN}_{entity_key}"
+        platform = self._get_platform_for_entity(config_entry_id, entity_key)
 
         # Build entity ID using domain and entity key
         # Format: platform.domain_entitykey
         return f"{platform}.{DOMAIN}_{entity_key}"
 
-    def _get_platform_for_entity(self, entity_key: str) -> str:
+    def _get_platform_for_entity(
+        self,
+        config_entry_id: str,
+        entity_key: str,
+    ) -> Platform:
         """Determine platform for an entity key.
 
         Args:
+            config_entry_id: Config entry ID
             entity_key: Entity key
 
         Returns:
-            Platform string (sensor, number, select, etc.)
+            Home Assistant Platform
         """
-        # Check in which category the entity belongs
-        for category, entities in ENTITY_CATEGORIES.items():
-            if entity_key in entities:
-                if "number" in category:
-                    return Platform.NUMBER
-                elif "select" in category:
-                    return Platform.SELECT
-                elif "binary" in category:
-                    return Platform.BINARY_SENSOR
-                else:
-                    return Platform.SENSOR
+        config = self._get_config_for_entry(config_entry_id)
 
-        # Default to sensor
+        if config:
+            platform_map = {
+                "sensors": Platform.SENSOR,
+                "switches": Platform.SWITCH,
+                "selects": Platform.SELECT,
+                "binary_sensors": Platform.BINARY_SENSOR,
+                "numbers": Platform.NUMBER,
+            }
+
+            for entity_type, platform in platform_map.items():
+                for entity in config.get(entity_type, []):
+                    if entity.get("entity_id") == entity_key:
+                        return platform
+
+        # Fallback to simple matching if config not available or not found
+        if "switch" in entity_key:
+            return Platform.SWITCH
+        if "select" in entity_key:
+            return Platform.SELECT
+        if "binary" in entity_key:
+            return Platform.BINARY_SENSOR
+        if "number" in entity_key or any(
+            x in entity_key
+            for x in ["current", "voltage", "power", "limit"]
+        ):
+            # Try to guess based on common number entity keywords
+            # but default to sensor as it's safer
+            pass
+
         return Platform.SENSOR
 
     async def _bulk_update_entities(
@@ -487,10 +470,12 @@ def validate_entity_exists(
     return entity is not None
 
 
-def get_entity_category_for_entity(entity_id: str) -> str | None:
+def get_entity_category_for_entity(hass: HomeAssistant, config_entry_id: str, entity_id: str) -> str | None:
     """Determine which category an entity belongs to.
 
     Args:
+        hass: Home Assistant instance
+        config_entry_id: Config entry ID
         entity_id: Full entity ID
 
     Returns:
@@ -507,10 +492,34 @@ def get_entity_category_for_entity(entity_id: str) -> str | None:
     if entity_key.startswith(f"{DOMAIN}_"):
         entity_key = entity_key[len(DOMAIN) + 1 :]
 
-    # Search for entity key in categories
-    for category, entities in ENTITY_CATEGORIES.items():
-        if entity_key in entities:
-            return category
+    # Search for entity key in configuration
+    manager = async_get_entity_manager(hass)
+    config = manager._get_config_for_entry(config_entry_id)
+    if not config:
+        return None
+
+    for entity_type in ["sensors", "switches", "selects", "binary_sensors", "numbers"]:
+        for entity in config.get(entity_type, []):
+            if entity.get("entity_id") == entity_key:
+                # Return explicit category if present
+                if category := entity.get("entity_category"):
+                    return category
+
+                # Map back to old grouping names if needed for UI consistency
+                if entity_type == "numbers":
+                    return "configurable_numbers"
+                if entity_type == "selects":
+                    return "configurable_selects"
+                if entity.get("source_type") == "calculated":
+                    return "calculated_sensors"
+
+                # Check for feature-based groupings
+                if "_b" in entity_key or "_c" in entity_key or "phase_b" in entity_key or "phase_c" in entity_key:
+                    return "3phase_sensors"
+                if "bus_voltage" in entity_key and ("positive" in entity_key or "negative" in entity_key):
+                    return "split_phase_sensors"
+                if "pv2_" in entity_key:
+                    return "dual_pv_sensors"
 
     return None
 
