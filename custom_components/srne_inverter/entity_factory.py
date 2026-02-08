@@ -134,6 +134,15 @@ class EntityFactory:
 
         for entity_config in entity_configs:
             try:
+                # Check if entity should be enabled based on config flow options
+                if not EntityFactory._is_entity_enabled(entry, entity_config, entity_type):
+                    _LOGGER.debug(
+                        "Skipping %s entity %s: disabled in options",
+                        entity_type[:-1],
+                        entity_config.get("name"),
+                    )
+                    continue
+
                 # Pass device config to switches, selects, and numbers for register lookup
                 if entity_type in ("switches", "selects", "numbers"):
                     entity = factory_method(coordinator, entry, entity_config, config)
@@ -155,3 +164,44 @@ class EntityFactory:
                 )
 
         return entities
+
+    @staticmethod
+    def _is_entity_enabled(
+        entry: ConfigEntry, entity_config: dict[str, Any], entity_type: str
+    ) -> bool:
+        """Check if an entity is enabled in the config entry options.
+
+        Args:
+            entry: Config entry
+            entity_config: Entity configuration
+            entity_type: Type of entity (sensors, numbers, etc.)
+
+        Returns:
+            True if entity is enabled, False otherwise
+        """
+        options = entry.options
+
+        # Configurable Numbers
+        if entity_type == "numbers":
+            return options.get("enable_configurable_numbers", True)
+
+        # Configurable Selects
+        if entity_type == "selects":
+            return options.get("enable_configurable_selects", True)
+
+        # Sensors (Diagnostic, Calculated, Energy)
+        if entity_type == "sensors":
+            # Diagnostic sensors
+            if entity_config.get("entity_category") == "diagnostic":
+                return options.get("enable_diagnostic_sensors", True)
+
+            # Calculated sensors
+            if entity_config.get("source_type") == "calculated":
+                return options.get("enable_calculated_sensors", True)
+
+            # Energy Dashboard sensors
+            if entity_config.get("device_class") == "energy":
+                return options.get("enable_energy_dashboard", True)
+
+        # Default to enabled for other types (switches, binary_sensors, etc.)
+        return True
