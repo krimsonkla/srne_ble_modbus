@@ -32,12 +32,12 @@ BLE_WRITE_UUID = "53300001-0023-4BD4-BBD5-A6920E4C5653"
 BLE_NOTIFY_UUID = "53300005-0023-4BD4-BBD5-A6920E4C5653"
 
 # Timing constants (in seconds) - Optimized for BLE Modbus performance
-COMMAND_DELAY = 0.1  # Default delay - matches other BLE integrations (100ms)
-COMMAND_DELAY_WRITE = 0.5  # Write operations need more processing time
-BATCH_READ_DELAY = 0.1  # Batch reads - fast sequential reads (100ms)
-WRITE_TIMEOUT = 2000  # Timeout for write operations
-READ_TIMEOUT = 2000  # Timeout for read operations
-POWER_STATE_CHANGE_DELAY = 5000  # Wait after power on/off command
+COMMAND_DELAY = 1.0  # Increased from 0.1 for stability
+COMMAND_DELAY_WRITE = 2.0  # Increased from 0.5 for stability
+BATCH_READ_DELAY = 1.0  # Increased from 0.1 for stability
+WRITE_TIMEOUT = 5000  # Increased from 2000
+READ_TIMEOUT = 5000  # Increased from 2000
+POWER_STATE_CHANGE_DELAY = 5000  # Increased from 5000
 
 
 # ============================================================================

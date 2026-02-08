@@ -36,10 +36,10 @@ device:
     default_slave_id: 1
 
   timing:
-    command_delay: 0.1
-    batch_read_delay: 0.1
-    write_timeout: 2000
-    read_timeout: 2000
+    command_delay: 1
+    batch_read_delay: 1
+    write_timeout: 5
+    read_timeout: 5
 
 # ============================================================================
 # CONFIG FLOW PAGES

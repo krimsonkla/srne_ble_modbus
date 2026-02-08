@@ -832,10 +832,14 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_connection_attempt = time.time()
 
         try:
-            if not self._ble_device:
-                self._ble_device = bluetooth.async_ble_device_from_address(
+            # Always get the latest BLEDevice from Home Assistant's bluetooth component
+            # to ensure we have current discovery information
+            def _get_ble_device():
+                return bluetooth.async_ble_device_from_address(
                     self.hass, self._address, connectable=True
                 )
+
+            self._ble_device = _get_ble_device()
 
             if not self._ble_device:
                 _LOGGER.error("BLE device not found: %s", self._address)
@@ -851,12 +855,16 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             _LOGGER.debug("Connecting to BLE device %s", self._address)
             try:
+                # Use establish_connection with a callback to ensure it can refresh
+                # the BLEDevice during retries. Increased timeout to 45s to allow
+                # for more robust retry attempts.
                 self._client = await asyncio.wait_for(
                     establish_connection(
                         BleakClient,
                         self._ble_device,
                         self._ble_device.address,
                         disconnected_callback=self._on_disconnect,
+                        ble_device_callback=_get_ble_device,
                     ),
                     timeout=30.0,
                 )
@@ -879,28 +887,42 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.error("Failed to connect to BLE device")
                 return False
 
-            # Subscribe to notifications (10 second timeout)
-            try:
-                await asyncio.wait_for(
-                    self._client.start_notify(
-                        BLE_NOTIFY_UUID, self._notification_handler
-                    ),
-                    timeout=10.0,
-                )
-            except asyncio.TimeoutError:
-                _LOGGER.error("Timeout subscribing to notifications after 10 seconds")
-                if self._client:
-                    await self._client.disconnect()
-                    self._client = None
-                self._consecutive_failures += 1
-                self._backoff_time = min(self._backoff_time * 2, self._max_backoff)
-                _LOGGER.debug(
-                    "Notification subscription failed, backoff increased to %.1fs (failures: %d/%d)",
-                    self._backoff_time,
-                    self._consecutive_failures,
-                    self._max_consecutive_failures,
-                )
-                return False
+            # Subscribe to notifications with retry (15 second total timeout)
+            # Some devices fail the first notification subscription attempt
+            max_notify_attempts = 2
+            for attempt in range(max_notify_attempts):
+                try:
+                    await asyncio.wait_for(
+                        self._client.start_notify(
+                            BLE_NOTIFY_UUID, self._notification_handler
+                        ),
+                        timeout=7.0,
+                    )
+                    break
+                except (asyncio.TimeoutError, BleakError) as err:
+                    if attempt == max_notify_attempts - 1:
+                        _LOGGER.error(
+                            "Timeout subscribing to notifications after %d attempts",
+                            max_notify_attempts,
+                        )
+                        if self._client:
+                            await self._client.disconnect()
+                            self._client = None
+                        self._consecutive_failures += 1
+                        self._backoff_time = min(self._backoff_time * 2, self._max_backoff)
+                        _LOGGER.debug(
+                            "Notification subscription failed, backoff increased to %.1fs (failures: %d/%d)",
+                            self._backoff_time,
+                            self._consecutive_failures,
+                            self._max_consecutive_failures,
+                        )
+                        return False
+                    _LOGGER.debug(
+                        "Notification subscription attempt %d failed, retrying: %s",
+                        attempt + 1,
+                        err,
+                    )
+                    await asyncio.sleep(1.0)
 
             _LOGGER.info("Connected to SRNE inverter at %s", self._address)
             self._backoff_time = 1.0
@@ -1008,7 +1030,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Wait for notification response
             try:
                 response = await asyncio.wait_for(
-                    self._notification_queue.get(), timeout=3.0
+                    self._notification_queue.get(), timeout=5.0
                 )
                 decoded = ModbusProtocol.decode_response(response)
                 _LOGGER.debug("Decoded response: %s", decoded)
@@ -1050,7 +1072,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
 
                 response = await asyncio.wait_for(
-                    self._notification_queue.get(), timeout=3.0
+                    self._notification_queue.get(), timeout=5.0
                 )
                 decoded = ModbusProtocol.decode_response(response)
 
@@ -1110,7 +1132,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         register
                     )
                     return False
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(COMMAND_DELAY_WRITE)
 
         await self._write_queue.put((register, value))
 
