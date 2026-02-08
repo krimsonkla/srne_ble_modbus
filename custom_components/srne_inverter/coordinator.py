@@ -177,7 +177,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=15),  # Optimized for ~9s avg update time
+            update_interval=timedelta(seconds=30),  # Optimized for ~9s avg update time
         )
 
         self._address = entry.data["address"]
