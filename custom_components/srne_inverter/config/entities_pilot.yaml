@@ -36,8 +36,8 @@ device:
     default_slave_id: 1
 
   timing:
-    command_delay: 2000
-    batch_read_delay: 800
+    command_delay: 0.1
+    batch_read_delay: 0.1
     write_timeout: 2000
     read_timeout: 2000
 

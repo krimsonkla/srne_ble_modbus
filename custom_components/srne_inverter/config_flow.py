@@ -1100,7 +1100,7 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     "command_delay_write",
-                    default=current_options.get("command_delay_write", 2.0),
+                    default=current_options.get("command_delay_write", 0.1),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0.5,
@@ -1112,7 +1112,7 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     "batch_read_delay",
-                    default=current_options.get("batch_read_delay", 0.8),
+                    default=current_options.get("batch_read_delay", 0.1),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0.5,
