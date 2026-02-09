@@ -83,7 +83,9 @@ async def _hide_failed_entities(
     for entity in entities:
         # Extract register name from entity unique_id
         # Format: {entry_id}_{entity_id}
-        entity_id_part = entity.unique_id.split("_", 1)[1] if "_" in entity.unique_id else None
+        entity_id_part = (
+            entity.unique_id.split("_", 1)[1] if "_" in entity.unique_id else None
+        )
 
         if not entity_id_part:
             continue
@@ -92,13 +94,12 @@ async def _hide_failed_entities(
         if entity_id_part in coordinator._unavailable_sensors:
             if entity.disabled_by != er.RegistryEntryDisabler.INTEGRATION:
                 entity_reg.async_update_entity(
-                    entity.entity_id,
-                    disabled_by=er.RegistryEntryDisabler.INTEGRATION
+                    entity.entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION
                 )
                 disabled_count += 1
                 _LOGGER.info(
                     "Disabled unavailable entity: %s (missing dependencies)",
-                    entity.entity_id
+                    entity.entity_id,
                 )
             continue
 
@@ -106,7 +107,13 @@ async def _hide_failed_entities(
         register_name = None
 
         # Check all entity types for matching entity_id
-        for entity_type in ["sensors", "numbers", "selects", "switches", "binary_sensors"]:
+        for entity_type in [
+            "sensors",
+            "numbers",
+            "selects",
+            "switches",
+            "binary_sensors",
+        ]:
             entities_list = device_config.get(entity_type, [])
             for ent_config in entities_list if isinstance(entities_list, list) else []:
                 if ent_config.get("entity_id") == entity_id_part:
@@ -119,20 +126,19 @@ async def _hide_failed_entities(
         if register_name and coordinator.is_register_failed(register_name):
             if entity.disabled_by != er.RegistryEntryDisabler.INTEGRATION:
                 entity_reg.async_update_entity(
-                    entity.entity_id,
-                    disabled_by=er.RegistryEntryDisabler.INTEGRATION
+                    entity.entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION
                 )
                 disabled_count += 1
                 _LOGGER.info(
                     "Disabled entity %s: register %s not supported by inverter",
                     entity.entity_id,
-                    register_name
+                    register_name,
                 )
 
     if disabled_count > 0:
         _LOGGER.info(
             "Disabled %d unsupported entities. They will be hidden from UI.",
-            disabled_count
+            disabled_count,
         )
 
     return disabled_count
@@ -189,6 +195,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Hide unsupported entities after first refresh
     await _hide_failed_entities(hass, entry, coordinator)
 
+    # Register options update listener
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+
     # Register services
     async def handle_force_refresh(call: ServiceCall) -> None:
         """Handle force refresh service call."""
@@ -241,8 +250,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         disabled_count = await _hide_failed_entities(hass, entry, coordinator)
 
         _LOGGER.info(
-            "Hide unsupported entities complete: %d entities disabled",
-            disabled_count
+            "Hide unsupported entities complete: %d entities disabled", disabled_count
         )
 
     hass.services.async_register(
@@ -275,6 +283,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get("address"),
     )
     return True
+
+
+async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload config entry when options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

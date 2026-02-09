@@ -173,11 +173,19 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             entry: Config entry
             device_config: Device configuration with registers
         """
+        # Get update interval from options, default to 60s
+        update_interval_seconds = entry.options.get("update_interval", 60)
+
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=30),  # Optimized for ~9s avg update time
+            update_interval=timedelta(seconds=update_interval_seconds),
+        )
+
+        _LOGGER.info(
+            "Initialized coordinator with %ds update interval (ephemeral connection pattern)",
+            update_interval_seconds,
         )
 
         self._address = entry.data["address"]
@@ -223,9 +231,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _load_failed_registers(self) -> None:
         """Load previously failed registers and unavailable sensors from storage."""
-        store = Store(
-            self.hass, 1, f"{DOMAIN}_{self._entry.entry_id}_failed_registers"
-        )
+        store = Store(self.hass, 1, f"{DOMAIN}_{self._entry.entry_id}_failed_registers")
 
         try:
             data = await store.async_load()
@@ -370,12 +376,20 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if address in self._failed_registers:
                 affected_sensors = self._dependency_map.get(reg_name, [])
                 if affected_sensors:
-                    affected_sensors_by_register[f"{reg_name} (0x{address:04X})"] = affected_sensors
+                    affected_sensors_by_register[f"{reg_name} (0x{address:04X})"] = (
+                        affected_sensors
+                    )
 
         if affected_sensors_by_register:
             _LOGGER.debug(
                 "Failed registers impact %d calculated sensors:",
-                len(set(s for sensors in affected_sensors_by_register.values() for s in sensors)),
+                len(
+                    set(
+                        s
+                        for sensors in affected_sensors_by_register.values()
+                        for s in sensors
+                    )
+                ),
             )
             for reg, sensors in affected_sensors_by_register.items():
                 _LOGGER.debug(
@@ -391,17 +405,17 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _save_failed_registers(self) -> None:
         """Save failed registers and unavailable sensors to storage."""
-        store = Store(
-            self.hass, 1, f"{DOMAIN}_{self._entry.entry_id}_failed_registers"
-        )
+        store = Store(self.hass, 1, f"{DOMAIN}_{self._entry.entry_id}_failed_registers")
         try:
             unavailable_sensors = self._get_unavailable_sensors() if self.data else []
             self._unavailable_sensors = set(unavailable_sensors)
 
-            await store.async_save({
-                "failed_registers": list(self._failed_registers),
-                "unavailable_sensors": unavailable_sensors,
-            })
+            await store.async_save(
+                {
+                    "failed_registers": list(self._failed_registers),
+                    "unavailable_sensors": unavailable_sensors,
+                }
+            )
 
             _LOGGER.info(
                 "Saved %d failed registers to storage: %s",
@@ -423,9 +437,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def clear_failed_registers(self) -> None:
         """Clear failed register cache and force re-scan of all registers."""
-        store = Store(
-            self.hass, 1, f"{DOMAIN}_{self._entry.entry_id}_failed_registers"
-        )
+        store = Store(self.hass, 1, f"{DOMAIN}_{self._entry.entry_id}_failed_registers")
 
         try:
             await store.async_remove()
@@ -436,14 +448,14 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             _LOGGER.info(
                 "Cleared %d failed registers from cache. All registers will be re-scanned.",
-                old_count
+                old_count,
             )
 
             self._rebuild_batches()
 
             _LOGGER.info(
                 "Rebuilt %d register batches for full re-scan",
-                len(self._register_batches)
+                len(self._register_batches),
             )
 
             await self.async_refresh()
@@ -455,7 +467,11 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise
 
     async def _split_and_retry_batch(
-        self, batch_start: int, batch_count: int, register_map: dict[int, str], split_depth: int = 0
+        self,
+        batch_start: int,
+        batch_count: int,
+        register_map: dict[int, str],
+        split_depth: int = 0,
     ) -> dict[str, Any]:
         """Split failed batch and retry smaller chunks to isolate unsupported registers.
 
@@ -490,7 +506,9 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 register_addr = batch_start + offset
 
                 if register_addr in self._failed_registers:
-                    _LOGGER.debug("Skipping known failed register 0x%04X", register_addr)
+                    _LOGGER.debug(
+                        "Skipping known failed register 0x%04X", register_addr
+                    )
                     continue
 
                 await asyncio.sleep(BATCH_READ_DELAY)
@@ -507,7 +525,11 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if result and "values" in result and "error" not in result:
                         from .register_batching import RegisterBatch, extract_batch_data
 
-                        single_batch = RegisterBatch(register_addr, 1, {0: register_map.get(offset, f"reg_0x{register_addr:04X}")})
+                        single_batch = RegisterBatch(
+                            register_addr,
+                            1,
+                            {0: register_map.get(offset, f"reg_0x{register_addr:04X}")},
+                        )
                         batch_data = extract_batch_data(
                             single_batch,
                             result["values"],
@@ -515,7 +537,9 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             self._to_signed_int16,
                         )
                         data.update(batch_data)
-                        _LOGGER.debug("Register 0x%04X read successfully", register_addr)
+                        _LOGGER.debug(
+                            "Register 0x%04X read successfully", register_addr
+                        )
                     elif result is None:
                         if self._client is None or not self._client.is_connected:
                             _LOGGER.debug(
@@ -559,14 +583,16 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         data = {}
-        first_half_map = {
-            k: v for k, v in register_map.items() if k < mid_point
-        }
+        first_half_map = {k: v for k, v in register_map.items() if k < mid_point}
         if first_half_map:
             try:
                 await asyncio.sleep(BATCH_READ_DELAY)
                 first_result = await self._read_register(batch_start, count=mid_point)
-                if first_result and "values" in first_result and "error" not in first_result:
+                if (
+                    first_result
+                    and "values" in first_result
+                    and "error" not in first_result
+                ):
                     # Success - extract data
                     from .register_batching import RegisterBatch, extract_batch_data
 
@@ -579,7 +605,9 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                     data.update(batch_data)
                     _LOGGER.debug(
-                        "First half succeeded: 0x%04X (count=%d)", batch_start, mid_point
+                        "First half succeeded: 0x%04X (count=%d)",
+                        batch_start,
+                        mid_point,
                     )
                 else:
                     # First half failed - recurse
@@ -613,7 +641,11 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 second_result = await self._read_register(
                     second_half_start, count=second_half_count
                 )
-                if second_result and "values" in second_result and "error" not in second_result:
+                if (
+                    second_result
+                    and "values" in second_result
+                    and "error" not in second_result
+                ):
                     # Success - extract data
                     from .register_batching import RegisterBatch, extract_batch_data
 
@@ -636,7 +668,10 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # Second half failed - recurse
                     _LOGGER.debug("Second half failed, splitting further")
                     second_data = await self._split_and_retry_batch(
-                        second_half_start, second_half_count, second_half_map, split_depth + 1
+                        second_half_start,
+                        second_half_count,
+                        second_half_map,
+                        split_depth + 1,
                     )
                     data.update(second_data)
             except (EOFError, BleakError) as err:
@@ -648,7 +683,9 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     err,
                 )
                 # Mark all registers in second half as failed
-                failed_registers = [second_half_start + i for i in range(second_half_count)]
+                failed_registers = [
+                    second_half_start + i for i in range(second_half_count)
+                ]
                 self._failed_registers.update(failed_registers)
 
         return data
@@ -679,6 +716,10 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Fetch data from inverter using batch reads.
 
         Batches are generated from register definitions in YAML.
+
+        Implements ephemeral connection pattern:
+        - Connect before reads
+        - Disconnect after completion (success or error)
         """
         self._update_start_time = time.time()
 
@@ -733,7 +774,10 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._failed_reads += 1
 
                     split_data = await self._split_and_retry_batch(
-                        batch.start_address, batch.count, batch.register_map, split_depth=0
+                        batch.start_address,
+                        batch.count,
+                        batch.register_map,
+                        split_depth=0,
                     )
                     if split_data:
                         data.update(split_data)
@@ -790,6 +834,45 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(
                 f"Unexpected error communicating with device: {type(err).__name__}: {err}"
             ) from err
+        finally:
+            # PHASE 1: Always disconnect after update (success or failure)
+            # This implements the ephemeral connection pattern recommended by
+            # Home Assistant BLE integration best practices
+            await self._disconnect()
+            _LOGGER.debug("BLE connection closed (ephemeral pattern)")
+
+    async def _disconnect(self) -> None:
+        """Disconnect BLE client and free adapter resources.
+
+        This implements the ephemeral connection pattern recommended by
+        Home Assistant BLE integration best practices.
+        """
+        if not self._client:
+            return
+
+        try:
+            if self._client.is_connected:
+                # Stop notifications first
+                try:
+                    await asyncio.wait_for(
+                        self._client.stop_notify(BLE_NOTIFY_UUID), timeout=2.0
+                    )
+                    _LOGGER.debug("Stopped BLE notifications")
+                except (BleakError, asyncio.TimeoutError) as err:
+                    _LOGGER.debug("Stop notify error (non-critical): %s", err)
+
+                # Disconnect from device
+                try:
+                    await asyncio.wait_for(self._client.disconnect(), timeout=2.0)
+                    _LOGGER.debug("BLE connection closed successfully")
+                except (BleakError, asyncio.TimeoutError) as err:
+                    _LOGGER.debug("Disconnect error (non-critical): %s", err)
+        except Exception as err:
+            _LOGGER.warning("Unexpected error during disconnect: %s", err)
+        finally:
+            self._client = None
+            self._ble_device = None
+            self._clear_notification_queue()
 
     async def _ensure_connection(self) -> bool:
         """Ensure BLE connection is established with exponential backoff."""
@@ -855,18 +938,16 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             _LOGGER.debug("Connecting to BLE device %s", self._address)
             try:
-                # Use establish_connection with a callback to ensure it can refresh
-                # the BLEDevice during retries. Increased timeout to 45s to allow
-                # for more robust retry attempts.
-                self._client = await asyncio.wait_for(
-                    establish_connection(
-                        BleakClient,
-                        self._ble_device,
-                        self._ble_device.address,
-                        disconnected_callback=self._on_disconnect,
-                        ble_device_callback=_get_ble_device,
-                    ),
-                    timeout=30.0,
+                # PHASE 1 FIX: Remove asyncio.wait_for wrapper and add max_attempts=2
+                # The establish_connection function has its own internal timeout handling,
+                # so wrapping it in wait_for causes timeout conflicts
+                self._client = await establish_connection(
+                    BleakClient,
+                    self._ble_device,
+                    self._ble_device.address,
+                    disconnected_callback=self._on_disconnect,
+                    ble_device_callback=_get_ble_device,
+                    max_attempts=2,
                 )
             except asyncio.TimeoutError:
                 _LOGGER.error(
@@ -909,7 +990,9 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             await self._client.disconnect()
                             self._client = None
                         self._consecutive_failures += 1
-                        self._backoff_time = min(self._backoff_time * 2, self._max_backoff)
+                        self._backoff_time = min(
+                            self._backoff_time * 2, self._max_backoff
+                        )
                         _LOGGER.debug(
                             "Notification subscription failed, backoff increased to %.1fs (failures: %d/%d)",
                             self._backoff_time,
@@ -952,6 +1035,8 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             _LOGGER.debug("BLE device disconnected: %s", self._address)
             self._client = None
+            # PHASE 1: Clear notification queue on unexpected disconnect
+            self._clear_notification_queue()
         except Exception as err:
             _LOGGER.error("Error in disconnect callback: %s", err)
 
@@ -1036,9 +1121,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Decoded response: %s", decoded)
                 return decoded
             except asyncio.TimeoutError:
-                _LOGGER.debug(
-                    "Timeout waiting for register 0x%04X response", register
-                )
+                _LOGGER.debug("Timeout waiting for register 0x%04X response", register)
                 self._failed_reads += 1
                 return None
 
@@ -1087,7 +1170,10 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "Try common defaults: 4321, 0000, 111111, or 1111"
                         )
                     else:
-                        _LOGGER.error("Password authentication failed: error 0x%02X", error_code or 0)
+                        _LOGGER.error(
+                            "Password authentication failed: error 0x%02X",
+                            error_code or 0,
+                        )
                     return False
 
             except (BleakError, asyncio.TimeoutError) as err:
@@ -1123,13 +1209,13 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if password and password != 0:
                 _LOGGER.info(
                     "Register 0x%04X is protected, authenticating with password",
-                    register
+                    register,
                 )
                 if not await self._authenticate_with_password(password):
                     _LOGGER.error(
                         "Password authentication failed, cannot write to register 0x%04X. "
                         "Check password in integration settings.",
-                        register
+                        register,
                     )
                     return False
                 await asyncio.sleep(COMMAND_DELAY_WRITE)
@@ -1177,7 +1263,9 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     decoded = ModbusProtocol.decode_response(response)
 
                     if decoded and "error" not in decoded:
-                        _LOGGER.info("Successfully wrote register 0x%04X = %d", register, value)
+                        _LOGGER.info(
+                            "Successfully wrote register 0x%04X = %d", register, value
+                        )
                     else:
                         error_code = decoded.get("error") if decoded else None
 
@@ -1186,51 +1274,54 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                 "Write to register 0x%04X failed: Permission denied. "
                                 "Configure inverter password in integration settings. "
                                 "Common passwords: 4321, 0000, 111111",
-                                register
+                                register,
                             )
                         elif error_code == 0x05:
                             _LOGGER.error(
                                 "Write to register 0x%04X failed: Incorrect password. "
                                 "Check password in integration settings.",
-                                register
+                                register,
                             )
                         elif error_code == 0x09:
                             _LOGGER.error(
                                 "Write to register 0x%04X failed: System locked. "
                                 "Configure password in integration settings.",
-                                register
+                                register,
                             )
                         elif error_code == 0x02:
                             _LOGGER.error(
                                 "Write to register 0x%04X failed: Illegal data address",
-                                register
+                                register,
                             )
                         elif error_code == 0x03:
                             _LOGGER.error(
                                 "Write to register 0x%04X failed: Value %d out of range",
-                                register, value
+                                register,
+                                value,
                             )
                         elif error_code == 0x07:
                             _LOGGER.error(
                                 "Write to register 0x%04X failed: Read-only register",
-                                register
+                                register,
                             )
                         elif error_code == 0x08:
                             _LOGGER.error(
                                 "Write to register 0x%04X failed: Cannot modify during operation",
-                                register
+                                register,
                             )
                         elif error_code:
-                            error_msg = MODBUS_ERROR_CODES.get(error_code, f"Unknown error 0x{error_code:02X}")
+                            error_msg = MODBUS_ERROR_CODES.get(
+                                error_code, f"Unknown error 0x{error_code:02X}"
+                            )
                             _LOGGER.error(
                                 "Write to register 0x%04X failed: %s",
                                 register,
-                                error_msg
+                                error_msg,
                             )
                         else:
                             _LOGGER.error(
                                 "Write to register 0x%04X failed: Timeout or invalid response",
-                                register
+                                register,
                             )
 
                 except (BleakError, asyncio.TimeoutError) as err:

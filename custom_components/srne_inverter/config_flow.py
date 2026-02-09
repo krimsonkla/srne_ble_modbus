@@ -180,7 +180,7 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         """Get the options flow handler."""
-        return SRNEOptionsFlowHandler()
+        return SRNEOptionsFlowHandler(config_entry)
 
 
 # Configuration presets for common use cases
@@ -234,12 +234,13 @@ CONFIGURATION_PRESETS = {
 class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for SRNE Inverter."""
 
-    def __init__(self) -> None:
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow.
 
-        Note: self.config_entry is automatically provided by the parent
-        OptionsFlow class as a property after instantiation by the framework.
+        Args:
+            config_entry: The config entry being configured
         """
+        self.config_entry = config_entry
         self._current_section: str | None = None
         self._schema_builder: ConfigFlowSchemaBuilder | None = None
 
@@ -248,9 +249,7 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
         if USE_DYNAMIC_SCHEMAS:
             self._schema_builder = ConfigFlowSchemaBuilder()
 
-    def _build_dynamic_schema(
-        self, page_id: str
-    ) -> vol.Schema | None:
+    def _build_dynamic_schema(self, page_id: str) -> vol.Schema | None:
         """
         Build schema dynamically using YAML configuration.
 
@@ -300,9 +299,7 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                 page_id, user_input, all_values
             )
         except Exception as e:
-            _LOGGER.error(
-                "Error validating dynamic input for %s: %s", page_id, str(e)
-            )
+            _LOGGER.error("Error validating dynamic input for %s: %s", page_id, str(e))
             return (True, {})
 
     def _parse_dynamic_input(
@@ -351,7 +348,11 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
         # Write each field that maps to a writable register
         for field_name, value in user_input.items():
             # Skip special fields that aren't registers
-            if field_name in ["clear_failed_registers", "expert_acknowledgment", "expert_mode_acknowledged"]:
+            if field_name in [
+                "clear_failed_registers",
+                "expert_acknowledgment",
+                "expert_mode_acknowledged",
+            ]:
                 continue
 
             # Find matching register definition
@@ -385,24 +386,36 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                 continue
 
             # Write to inverter
-            _LOGGER.info("Writing %s = %s to register 0x%04X (raw value: %s)",
-                         field_name, value, address, register_value)
+            _LOGGER.info(
+                "Writing %s = %s to register 0x%04X (raw value: %s)",
+                field_name,
+                value,
+                address,
+                register_value,
+            )
 
             try:
-                success = await coordinator.async_write_register(address, register_value)
+                success = await coordinator.async_write_register(
+                    address, register_value
+                )
 
                 if not success:
-                    _LOGGER.error("Failed to write %s to register 0x%04X", field_name, address)
+                    _LOGGER.error(
+                        "Failed to write %s to register 0x%04X", field_name, address
+                    )
                     errors[field_name] = "write_failed"
             except Exception as err:
-                _LOGGER.error("Exception writing %s to register 0x%04X: %s", field_name, address, err)
+                _LOGGER.error(
+                    "Exception writing %s to register 0x%04X: %s",
+                    field_name,
+                    address,
+                    err,
+                )
                 errors[field_name] = "write_failed"
 
         return errors
 
-    def _convert_value_to_register(
-        self, value: Any, reg_def: dict[str, Any]
-    ) -> int:
+    def _convert_value_to_register(self, value: Any, reg_def: dict[str, Any]) -> int:
         """Convert user input value to raw register value.
 
         Args:
@@ -455,7 +468,9 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
         # Get current values
         coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
         all_values = (
-            {**coordinator.data, **user_input} if coordinator and coordinator.data else user_input
+            {**coordinator.data, **user_input}
+            if coordinator and coordinator.data
+            else user_input
         )
 
         # Validate input
@@ -470,7 +485,7 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
         parsed_input = self._parse_dynamic_input(user_input)
 
         # Write to inverter first (if coordinator available)
-        if coordinator and hasattr(coordinator, '_device_config'):
+        if coordinator and hasattr(coordinator, "_device_config"):
             write_errors = await self._write_config_to_inverter(
                 parsed_input, coordinator._device_config
             )
@@ -497,6 +512,7 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                 "inverter_output": "Inverter Output (Inverter)",
                 "expert": "Expert Settings (Inverter)",
                 "integration": "Integration Settings",
+                "update_interval": "Update Interval",
                 "features": "Features (Sensors & Entities)",
                 "presets": "Configuration Presets",
             },
@@ -523,8 +539,10 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                     validated = await self._validate_essential_settings(user_input)
                     if validated:
                         # Get coordinator for device config and write access
-                        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
-                        if coordinator and hasattr(coordinator, '_device_config'):
+                        coordinator = self.hass.data.get(DOMAIN, {}).get(
+                            self.config_entry.entry_id
+                        )
+                        if coordinator and hasattr(coordinator, "_device_config"):
                             # Write to inverter first
                             write_errors = await self._write_config_to_inverter(
                                 user_input, coordinator._device_config
@@ -581,10 +599,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
         schema_dict = {}
 
         if "battery_capacity" in coordinator.data:
-            schema_dict[vol.Optional(
-                "battery_capacity",
-                default=coordinator.data["battery_capacity"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "battery_capacity",
+                    default=coordinator.data["battery_capacity"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=10,
                     max=400,
@@ -594,10 +614,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "battery_voltage" in coordinator.data:
-            schema_dict[vol.Optional(
-                "battery_voltage",
-                default=coordinator.data["battery_voltage"],
-            )] = selector.SelectSelector(
+            schema_dict[
+                vol.Optional(
+                    "battery_voltage",
+                    default=coordinator.data["battery_voltage"],
+                )
+            ] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=["12", "24", "36", "48"],
                     mode=selector.SelectSelectorMode.DROPDOWN,
@@ -643,8 +665,10 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                     validated = await self._validate_battery_settings(user_input)
                     if validated:
                         # Get coordinator for device config and write access
-                        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
-                        if coordinator and hasattr(coordinator, '_device_config'):
+                        coordinator = self.hass.data.get(DOMAIN, {}).get(
+                            self.config_entry.entry_id
+                        )
+                        if coordinator and hasattr(coordinator, "_device_config"):
                             # Write to inverter first
                             write_errors = await self._write_config_to_inverter(
                                 user_input, coordinator._device_config
@@ -662,7 +686,9 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                             return await self.async_step_init()
             except ValueError as err:
                 errors["base"] = str(err)
-                _LOGGER.error("Validation error in battery_management settings: %s", err)
+                _LOGGER.error(
+                    "Validation error in battery_management settings: %s", err
+                )
 
         # Try to build schema dynamically first
         dynamic_schema = self._build_dynamic_schema("battery_management")
@@ -702,10 +728,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
         schema_dict = {}
 
         if "max_charge_current" in coordinator.data:
-            schema_dict[vol.Optional(
-                "max_charge_current",
-                default=coordinator.data["max_charge_current"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "max_charge_current",
+                    default=coordinator.data["max_charge_current"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=200,
@@ -716,10 +744,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "max_ac_charge_current" in coordinator.data:
-            schema_dict[vol.Optional(
-                "max_ac_charge_current",
-                default=coordinator.data["max_ac_charge_current"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "max_ac_charge_current",
+                    default=coordinator.data["max_ac_charge_current"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=200,
@@ -730,10 +760,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "pv_max_charge_current" in coordinator.data:
-            schema_dict[vol.Optional(
-                "pv_max_charge_current",
-                default=coordinator.data["pv_max_charge_current"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "pv_max_charge_current",
+                    default=coordinator.data["pv_max_charge_current"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=150,
@@ -744,10 +776,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "discharge_stop_soc" in coordinator.data:
-            schema_dict[vol.Optional(
-                "discharge_stop_soc",
-                default=coordinator.data["discharge_stop_soc"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "discharge_stop_soc",
+                    default=coordinator.data["discharge_stop_soc"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=100,
@@ -757,10 +791,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "low_soc_alarm" in coordinator.data:
-            schema_dict[vol.Optional(
-                "low_soc_alarm",
-                default=coordinator.data["low_soc_alarm"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "low_soc_alarm",
+                    default=coordinator.data["low_soc_alarm"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=100,
@@ -770,10 +806,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "switch_to_ac_soc" in coordinator.data:
-            schema_dict[vol.Optional(
-                "switch_to_ac_soc",
-                default=coordinator.data["switch_to_ac_soc"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "switch_to_ac_soc",
+                    default=coordinator.data["switch_to_ac_soc"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=100,
@@ -783,10 +821,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "switch_to_battery_soc" in coordinator.data:
-            schema_dict[vol.Optional(
-                "switch_to_battery_soc",
-                default=coordinator.data["switch_to_battery_soc"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "switch_to_battery_soc",
+                    default=coordinator.data["switch_to_battery_soc"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1,
                     max=100,
@@ -796,27 +836,57 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "battery_type" in coordinator.data:
-            schema_dict[vol.Optional(
-                "battery_type",
-                default=coordinator.data["battery_type"],
-            )] = selector.SelectSelector(
+            schema_dict[
+                vol.Optional(
+                    "battery_type",
+                    default=coordinator.data["battery_type"],
+                )
+            ] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
-                        selector.SelectOptionDict(value="user_defined", label="User Defined"),
-                        selector.SelectOptionDict(value="sld", label="Sealed Lead Acid"),
-                        selector.SelectOptionDict(value="fld", label="Flooded Lead Acid"),
+                        selector.SelectOptionDict(
+                            value="user_defined", label="User Defined"
+                        ),
+                        selector.SelectOptionDict(
+                            value="sld", label="Sealed Lead Acid"
+                        ),
+                        selector.SelectOptionDict(
+                            value="fld", label="Flooded Lead Acid"
+                        ),
                         selector.SelectOptionDict(value="gel", label="GEL"),
-                        selector.SelectOptionDict(value="lifepo4_x14", label="LiFePO4 x14"),
-                        selector.SelectOptionDict(value="lifepo4_x15", label="LiFePO4 x15"),
-                        selector.SelectOptionDict(value="lifepo4_x16", label="LiFePO4 x16"),
-                        selector.SelectOptionDict(value="lifepo4_x7", label="LiFePO4 x7"),
-                        selector.SelectOptionDict(value="lifepo4_x8", label="LiFePO4 x8"),
-                        selector.SelectOptionDict(value="lifepo4_x9", label="LiFePO4 x9"),
-                        selector.SelectOptionDict(value="ternary_x7", label="Ternary Lithium x7"),
-                        selector.SelectOptionDict(value="ternary_x8", label="Ternary Lithium x8"),
-                        selector.SelectOptionDict(value="ternary_x13", label="Ternary Lithium x13"),
-                        selector.SelectOptionDict(value="ternary_x14", label="Ternary Lithium x14"),
-                        selector.SelectOptionDict(value="user_lithium", label="User-defined Lithium"),
+                        selector.SelectOptionDict(
+                            value="lifepo4_x14", label="LiFePO4 x14"
+                        ),
+                        selector.SelectOptionDict(
+                            value="lifepo4_x15", label="LiFePO4 x15"
+                        ),
+                        selector.SelectOptionDict(
+                            value="lifepo4_x16", label="LiFePO4 x16"
+                        ),
+                        selector.SelectOptionDict(
+                            value="lifepo4_x7", label="LiFePO4 x7"
+                        ),
+                        selector.SelectOptionDict(
+                            value="lifepo4_x8", label="LiFePO4 x8"
+                        ),
+                        selector.SelectOptionDict(
+                            value="lifepo4_x9", label="LiFePO4 x9"
+                        ),
+                        selector.SelectOptionDict(
+                            value="ternary_x7", label="Ternary Lithium x7"
+                        ),
+                        selector.SelectOptionDict(
+                            value="ternary_x8", label="Ternary Lithium x8"
+                        ),
+                        selector.SelectOptionDict(
+                            value="ternary_x13", label="Ternary Lithium x13"
+                        ),
+                        selector.SelectOptionDict(
+                            value="ternary_x14", label="Ternary Lithium x14"
+                        ),
+                        selector.SelectOptionDict(
+                            value="user_lithium", label="User-defined Lithium"
+                        ),
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
@@ -859,11 +929,15 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                     errors.update(error_dict)
                 else:
                     # Fall back to legacy validation
-                    validated = await self._validate_inverter_output_settings(user_input)
+                    validated = await self._validate_inverter_output_settings(
+                        user_input
+                    )
                     if validated:
                         # Get coordinator for device config and write access
-                        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
-                        if coordinator and hasattr(coordinator, '_device_config'):
+                        coordinator = self.hass.data.get(DOMAIN, {}).get(
+                            self.config_entry.entry_id
+                        )
+                        if coordinator and hasattr(coordinator, "_device_config"):
                             # Write to inverter first
                             write_errors = await self._write_config_to_inverter(
                                 user_input, coordinator._device_config
@@ -924,10 +998,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
         schema_dict = {}
 
         if "output_voltage" in coordinator.data:
-            schema_dict[vol.Optional(
-                "output_voltage",
-                default=coordinator.data["output_voltage"],
-            )] = selector.SelectSelector(
+            schema_dict[
+                vol.Optional(
+                    "output_voltage",
+                    default=coordinator.data["output_voltage"],
+                )
+            ] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=["100", "110", "120", "127", "220", "230", "240"],
                     mode=selector.SelectSelectorMode.DROPDOWN,
@@ -935,10 +1011,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "output_frequency" in coordinator.data:
-            schema_dict[vol.Optional(
-                "output_frequency",
-                default=coordinator.data["output_frequency"],
-            )] = selector.SelectSelector(
+            schema_dict[
+                vol.Optional(
+                    "output_frequency",
+                    default=coordinator.data["output_frequency"],
+                )
+            ] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=["50", "60"],
                     mode=selector.SelectSelectorMode.DROPDOWN,
@@ -946,28 +1024,40 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "ac_input_range" in coordinator.data:
-            schema_dict[vol.Optional(
-                "ac_input_range",
-                default=coordinator.data["ac_input_range"],
-            )] = selector.SelectSelector(
+            schema_dict[
+                vol.Optional(
+                    "ac_input_range",
+                    default=coordinator.data["ac_input_range"],
+                )
+            ] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
-                        selector.SelectOptionDict(value="narrow", label="Narrow (UPS Mode)"),
-                        selector.SelectOptionDict(value="wide", label="Wide (Appliance Mode)"),
+                        selector.SelectOptionDict(
+                            value="narrow", label="Narrow (UPS Mode)"
+                        ),
+                        selector.SelectOptionDict(
+                            value="wide", label="Wide (Appliance Mode)"
+                        ),
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             )
 
         if "charge_source_priority" in coordinator.data:
-            schema_dict[vol.Optional(
-                "charge_source_priority",
-                default=coordinator.data["charge_source_priority"],
-            )] = selector.SelectSelector(
+            schema_dict[
+                vol.Optional(
+                    "charge_source_priority",
+                    default=coordinator.data["charge_source_priority"],
+                )
+            ] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
-                        selector.SelectOptionDict(value="pv_priority", label="PV Priority (AC Backup)"),
-                        selector.SelectOptionDict(value="ac_priority", label="AC Priority"),
+                        selector.SelectOptionDict(
+                            value="pv_priority", label="PV Priority (AC Backup)"
+                        ),
+                        selector.SelectOptionDict(
+                            value="ac_priority", label="AC Priority"
+                        ),
                         selector.SelectOptionDict(value="hybrid", label="Hybrid Mode"),
                         selector.SelectOptionDict(value="pv_only", label="PV Only"),
                     ],
@@ -976,21 +1066,27 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "power_saving_mode" in coordinator.data:
-            schema_dict[vol.Optional(
-                "power_saving_mode",
-                default=coordinator.data["power_saving_mode"],
-            )] = cv.boolean
+            schema_dict[
+                vol.Optional(
+                    "power_saving_mode",
+                    default=coordinator.data["power_saving_mode"],
+                )
+            ] = cv.boolean
 
         if "output_priority" in coordinator.data:
-            schema_dict[vol.Optional(
-                "output_priority",
-                default=coordinator.data["output_priority"],
-            )] = selector.SelectSelector(
+            schema_dict[
+                vol.Optional(
+                    "output_priority",
+                    default=coordinator.data["output_priority"],
+                )
+            ] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
                         selector.SelectOptionDict(value="0", label="Solar First"),
                         selector.SelectOptionDict(value="1", label="Mains First"),
-                        selector.SelectOptionDict(value="2", label="SBU (Solar-Battery-Utility)"),
+                        selector.SelectOptionDict(
+                            value="2", label="SBU (Solar-Battery-Utility)"
+                        ),
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
@@ -1065,7 +1161,10 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                 # Save password to config_entry.data if provided
                 if "inverter_password" in user_input:
                     password_value = user_input["inverter_password"]
-                    new_data = {**self.config_entry.data, "inverter_password": password_value}
+                    new_data = {
+                        **self.config_entry.data,
+                        "inverter_password": password_value,
+                    }
                     self.hass.config_entries.async_update_entry(
                         self.config_entry, data=new_data
                     )
@@ -1084,7 +1183,9 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     "inverter_password",
                     description={
-                        "suggested_value": self.config_entry.data.get("inverter_password", 0)
+                        "suggested_value": self.config_entry.data.get(
+                            "inverter_password", 0
+                        )
                     },
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=9999999)),
                 vol.Optional(
@@ -1210,8 +1311,10 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                             for k, v in user_input.items()
                             if k != "expert_mode_acknowledged"
                         }
-                        success, error_dict = await self._handle_form_submission_dynamic(
-                            "expert_settings", register_input
+                        success, error_dict = (
+                            await self._handle_form_submission_dynamic(
+                                "expert_settings", register_input
+                            )
                         )
                         if success:
                             return await self.async_step_init()
@@ -1219,8 +1322,10 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                     else:
                         # Fall back to legacy approach
                         # Get coordinator for device config and write access
-                        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
-                        if coordinator and hasattr(coordinator, '_device_config'):
+                        coordinator = self.hass.data.get(DOMAIN, {}).get(
+                            self.config_entry.entry_id
+                        )
+                        if coordinator and hasattr(coordinator, "_device_config"):
                             # Remove acknowledgment from input before writing
                             register_input = {
                                 k: v
@@ -1285,9 +1390,13 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
         if not coordinator or not coordinator.data:
             return self.async_show_form(
                 step_id="expert",
-                data_schema=vol.Schema({
-                    vol.Required("expert_mode_acknowledged", default=False): cv.boolean,
-                }),
+                data_schema=vol.Schema(
+                    {
+                        vol.Required(
+                            "expert_mode_acknowledged", default=False
+                        ): cv.boolean,
+                    }
+                ),
                 errors={"base": "no_inverter_data"},
                 description_placeholders={
                     "description": "⚠️ Cannot read settings from inverter. Check connection and try again."
@@ -1298,13 +1407,17 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
         schema_dict = {}
 
         # Always require expert mode acknowledgment
-        schema_dict[vol.Required("expert_mode_acknowledged", default=False)] = cv.boolean
+        schema_dict[vol.Required("expert_mode_acknowledged", default=False)] = (
+            cv.boolean
+        )
 
         if "grid_voltage_low" in coordinator.data:
-            schema_dict[vol.Optional(
-                "grid_voltage_low",
-                default=coordinator.data["grid_voltage_low"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "grid_voltage_low",
+                    default=coordinator.data["grid_voltage_low"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=90,
                     max=280,
@@ -1315,10 +1428,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "grid_voltage_high" in coordinator.data:
-            schema_dict[vol.Optional(
-                "grid_voltage_high",
-                default=coordinator.data["grid_voltage_high"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "grid_voltage_high",
+                    default=coordinator.data["grid_voltage_high"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=90,
                     max=280,
@@ -1329,10 +1444,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "grid_frequency_low" in coordinator.data:
-            schema_dict[vol.Optional(
-                "grid_frequency_low",
-                default=coordinator.data["grid_frequency_low"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "grid_frequency_low",
+                    default=coordinator.data["grid_frequency_low"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=45,
                     max=65,
@@ -1343,10 +1460,12 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         if "grid_frequency_high" in coordinator.data:
-            schema_dict[vol.Optional(
-                "grid_frequency_high",
-                default=coordinator.data["grid_frequency_high"],
-            )] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    "grid_frequency_high",
+                    default=coordinator.data["grid_frequency_high"],
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=45,
                     max=65,
@@ -1358,7 +1477,9 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
 
         schema = vol.Schema(schema_dict)
 
-        available_count = len([k for k in schema_dict.keys() if k.schema != "expert_mode_acknowledged"])
+        available_count = len(
+            [k for k in schema_dict.keys() if k.schema != "expert_mode_acknowledged"]
+        )
 
         return self.async_show_form(
             step_id="expert",
@@ -1403,8 +1524,7 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
         # Build preset selection
         preset_options = [
             selector.SelectOptionDict(
-                value=key,
-                label=f"{preset['name']} - {preset['description']}"
+                value=key, label=f"{preset['name']} - {preset['description']}"
             )
             for key, preset in CONFIGURATION_PRESETS.items()
         ]
@@ -1430,6 +1550,38 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
                     "This will update multiple settings at once.\n"
                     "Your current settings will be preserved where not specified."
                 ),
+            },
+        )
+
+    async def async_step_update_interval(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Configure polling interval."""
+        if user_input is not None:
+            # Save changes
+            new_options = {**self.config_entry.options, **user_input}
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, options=new_options
+            )
+            # Return to main menu
+            return await self.async_step_init()
+
+        current_interval = self.config_entry.options.get("update_interval", 60)
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    "update_interval",
+                    default=current_interval,
+                ): vol.All(vol.Coerce(int), vol.Range(min=15, max=300)),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="update_interval",
+            data_schema=schema,
+            description_placeholders={
+                "current_interval": str(current_interval),
             },
         )
 
@@ -1489,9 +1641,7 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
             },
         )
 
-    async def _validate_essential_settings(
-        self, settings: dict[str, Any]
-    ) -> bool:
+    async def _validate_essential_settings(self, settings: dict[str, Any]) -> bool:
         """Validate battery config settings."""
         # Validate battery voltage is in allowed values
         battery_voltage = settings.get("battery_voltage")
@@ -1509,9 +1659,7 @@ class SRNEOptionsFlowHandler(config_entries.OptionsFlow):
 
         return True
 
-    async def _validate_battery_settings(
-        self, settings: dict[str, Any]
-    ) -> bool:
+    async def _validate_battery_settings(self, settings: dict[str, Any]) -> bool:
         """Validate battery settings."""
         # Validate charge currents
         max_charge = settings.get("max_charge_current", 200)
