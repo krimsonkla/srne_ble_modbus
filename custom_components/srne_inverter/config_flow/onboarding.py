@@ -154,15 +154,19 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_bluetooth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Confirm bluetooth discovery."""
+        """Confirm bluetooth discovery and start full onboarding."""
         if user_input is not None:
             address = self.context["unique_id"]
             device_name = self._discovered_devices.get(address, "SRNE Inverter")
 
-            return self.async_create_entry(
-                title=device_name,
-                data={CONF_ADDRESS: address},
-            )
+            _LOGGER.info("Bluetooth discovery confirmed for %s (%s), starting full onboarding", device_name, address)
+
+            # Store selected device for device_selected step
+            self._selected_address = address
+
+            # Follow proper state machine flow: device_scan → device_selected → welcome
+            self._state_machine.transition(OnboardingState.DEVICE_SELECTED)
+            return await self.async_step_device_selected()
 
         return self.async_show_form(
             step_id="bluetooth_confirm",
@@ -170,6 +174,25 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "name": self.context["title_placeholders"]["name"],
             },
         )
+
+    async def async_step_device_selected(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Device selected - initialize context and proceed to welcome."""
+        # Initialize onboarding context
+        address = self._selected_address
+        device_name = self._discovered_devices.get(address, "SRNE Inverter")
+
+        self._onboarding_context = OnboardingContext(
+            device_address=address,
+            device_name=device_name,
+        )
+
+        _LOGGER.info("Starting onboarding for device: %s (%s)", device_name, address)
+
+        # Transition to welcome screen
+        self._state_machine.transition(OnboardingState.WELCOME)
+        return await self.async_step_welcome()
 
     async def async_step_welcome(
         self, user_input: dict[str, Any] | None = None
@@ -207,6 +230,7 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._onboarding_context.mark_step_complete("user_level")
 
             _LOGGER.info("User selected level: %s", user_input["user_level"])
+            _LOGGER.info("Transitioning to hardware detection step")
 
             self._state_machine.transition(OnboardingState.HARDWARE_DETECTION)
             return await self.async_step_hardware_detection()
@@ -230,93 +254,292 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Hardware detection screen with progress."""
-        # If we have detection results, proceed to review
+        _LOGGER.info("=== HARDWARE DETECTION STEP CALLED ===")
+        _LOGGER.info("Device: %s (%s)", self._onboarding_context.device_name, self._onboarding_context.device_address)
+        _LOGGER.info("Existing detected_features: %s", self._onboarding_context.detected_features)
+
+        # If we have detection results, complete progress and proceed (background task completed)
         if self._onboarding_context.detected_features:
-            self._state_machine.transition(OnboardingState.DETECTION_REVIEW)
-            return await self.async_step_detection_review()
+            _LOGGER.info("Detection complete, showing progress_done")
+            return self.async_show_progress_done(next_step_id="detection_review")
 
         # Start detection in background
-        _LOGGER.info("Starting hardware feature detection")
+        _LOGGER.info("Starting hardware feature detection in background")
 
-        # Show progress indication
-        self.hass.async_create_task(self._run_detection())
+        # Create and track the background task
+        detection_task = self.hass.async_create_task(self._run_detection())
 
         return self.async_show_progress(
             step_id="hardware_detection",
             progress_action="detect_hardware",
+            progress_task=detection_task,
         )
 
     async def _run_detection(self) -> None:
-        """Run feature detection in background.
+        """Run feature detection in background using actual hardware probing."""
+        import time
 
-        Note: For Sprint 2, using model-based inference as a placeholder.
-        Sprint 2 refinement or Sprint 3 will implement actual hardware probing
-        once we have coordinator access patterns established.
-        """
+        start_time = time.time()
+        detector = FeatureDetector(None)
+        device_name = self._onboarding_context.device_name
+        results = None
+        detection_method = "failed"
+
         try:
-            import time
+            # Create temporary test coordinator for hardware probing
+            _LOGGER.info("Creating temporary connection for hardware feature detection")
+            test_coordinator = await self._create_test_coordinator()
 
-            start_time = time.time()
+            if test_coordinator:
+                try:
+                    # Create detector with test coordinator
+                    detector_with_hw = FeatureDetector(test_coordinator)
 
-            # Simulate detection progress with small delays
-            detector = FeatureDetector(None)  # No coordinator yet
-
-            # Use model-based inference for now (safe fallback)
-            device_name = self._onboarding_context.device_name
-            results = detector.infer_features_from_model(device_name)
-
-            # Add small delay to simulate hardware testing
-            await asyncio.sleep(0.5)
-
-            duration = time.time() - start_time
-
-            # Store results in context
-            self._onboarding_context.detected_features = results
-            self._onboarding_context.detection_method = "model_inference"
-            self._onboarding_context.detection_timestamp = time.strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            self._onboarding_context.detection_duration_seconds = duration
-            self._onboarding_context.mark_step_complete("hardware_detection")
-
-            _LOGGER.info(
-                "Feature inference complete in %.1f seconds. Inferred %d/%d features from model: %s",
-                duration,
-                sum(results.values()),
-                len(results),
-                device_name,
-            )
-
-            # Trigger next step
-            self.hass.async_create_task(
-                self.hass.config_entries.flow.async_configure(
-                    flow_id=self.flow_id,
-                    user_input={},
-                )
-            )
+                    # Run actual hardware detection
+                    _LOGGER.info("Starting hardware register testing for feature detection")
+                    results = await detector_with_hw.detect_all_features()
+                    detection_method = "hardware_probing"
+                    _LOGGER.info(
+                        "Hardware detection complete. Detected %d/%d features",
+                        sum(results.values()) if results else 0,
+                        len(results) if results else 0,
+                    )
+                finally:
+                    # Always cleanup test coordinator connection
+                    await self._cleanup_test_coordinator(test_coordinator)
 
         except Exception as err:
-            _LOGGER.error("Feature detection failed: %s", err, exc_info=True)
-            # Use all-false as safe default
-            self._onboarding_context.detected_features = {
-                "grid_tie": False,
-                "diesel_mode": False,
-                "three_phase": False,
-                "split_phase": False,
-                "parallel_operation": False,
-                "timed_operation": False,
-                "advanced_output": False,
-                "customized_models": False,
-            }
-            self._onboarding_context.detection_method = "failed"
-
-            # Still proceed to next step
-            self.hass.async_create_task(
-                self.hass.config_entries.flow.async_configure(
-                    flow_id=self.flow_id,
-                    user_input={},
-                )
+            _LOGGER.warning(
+                "Hardware detection failed: %s. Falling back to model inference",
+                err,
             )
+
+        # Fallback to model inference if hardware probing failed
+        if not results:
+            _LOGGER.info("Using model-based inference as fallback for: %s", device_name)
+            results = detector.infer_features_from_model(device_name)
+            detection_method = "model_inference_fallback"
+
+        duration = time.time() - start_time
+
+        # Store results in context
+        self._onboarding_context.detected_features = results
+        self._onboarding_context.detection_method = detection_method
+        self._onboarding_context.detection_timestamp = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        self._onboarding_context.detection_duration_seconds = duration
+        self._onboarding_context.mark_step_complete("hardware_detection")
+
+        _LOGGER.info(
+            "Feature detection complete in %.1f seconds using %s. Detected %d/%d features",
+            duration,
+            detection_method,
+            sum(results.values()),
+            len(results),
+        )
+
+        # Transition to detection review (don't call async_configure, let progress_done handle it)
+        self._state_machine.transition(OnboardingState.DETECTION_REVIEW)
+
+    async def _create_test_coordinator(self):
+        """Create a temporary coordinator for hardware feature testing.
+
+        Returns:
+            A minimal coordinator-like object with async_read_register method,
+            or None if creation failed.
+        """
+        try:
+            from ..infrastructure.transport.ble_transport import BLETransport
+            from ..infrastructure.transport.connection_manager import ConnectionManager
+            from ..application.services.timing_collector import TimingCollector
+            from ..infrastructure.protocol.modbus_rtu_protocol import ModbusRTUProtocol
+            from ..infrastructure.protocol.modbus_crc16 import ModbusCRC16
+
+            # Create minimal infrastructure for testing
+            timing_collector = TimingCollector()
+            crc = ModbusCRC16()
+            protocol = ModbusRTUProtocol(crc)
+
+            # Create BLE transport (only needs hass and timing_collector)
+            transport = BLETransport(
+                self.hass,
+                timing_collector,
+            )
+
+            # Create connection manager
+            connection_manager = ConnectionManager(transport)
+
+            # Set address on transport (done separately, not in constructor)
+            transport._address = self._onboarding_context.device_address
+
+            # Create minimal test coordinator wrapper
+            class TestCoordinator:
+                """Minimal coordinator for feature detection."""
+
+                def __init__(self, protocol, transport, connection_manager, address):
+                    self._protocol = protocol
+                    self._transport = transport
+                    self._connection_manager = connection_manager
+                    self._address = address
+
+                async def async_read_register(self, register: int) -> int | None:
+                    """Read a single register value using protocol."""
+                    try:
+                        # Ensure connected
+                        if not self._transport.is_connected:
+                            await self._connection_manager.ensure_connected(self._address)
+
+                        # Build Modbus read request using protocol
+                        request_frame = self._protocol.build_read_command(
+                            start_address=register,
+                            count=1,
+                        )
+
+                        # Send request and get response
+                        response = await self._transport.send(request_frame)
+
+                        if not response:
+                            return None
+
+                        # Decode response using protocol
+                        decoded = self._protocol.decode_response(response)
+
+                        # Check for error response (dash pattern or Modbus exception)
+                        # Both indicate the register/feature is not supported
+                        if "error" in decoded:
+                            # Return dash pattern for any error (unsupported or Modbus exception)
+                            # This tells the detector the feature is definitively not supported
+                            _LOGGER.debug(
+                                "Register 0x%04X error response: %s (treating as not supported)",
+                                register,
+                                decoded,
+                            )
+                            return 0x2D2D
+
+                        # Return first register value (response uses index keys: {0: value})
+                        if decoded and 0 in decoded:
+                            return decoded[0]
+
+                        return None
+
+                    except Exception as err:
+                        _LOGGER.debug("Test read register 0x%04X error: %s", register, err)
+                        return None
+
+            test_coord = TestCoordinator(
+                protocol,
+                transport,
+                connection_manager,
+                self._onboarding_context.device_address,
+            )
+
+            _LOGGER.debug("Test coordinator created successfully")
+            return test_coord
+
+        except Exception as err:
+            _LOGGER.error("Failed to create test coordinator: %s", err, exc_info=True)
+            return None
+
+    async def _cleanup_test_coordinator(self, test_coordinator) -> None:
+        """Cleanup test coordinator and disconnect.
+
+        Args:
+            test_coordinator: The test coordinator to cleanup
+        """
+        if not test_coordinator:
+            return
+
+        try:
+            _LOGGER.debug("Cleaning up test coordinator connection")
+            if hasattr(test_coordinator, "_connection_manager"):
+                await test_coordinator._connection_manager.disconnect()
+            _LOGGER.debug("Test coordinator cleanup complete")
+        except Exception as err:
+            _LOGGER.warning("Error during test coordinator cleanup: %s", err)
+
+    async def _read_current_settings(self) -> dict[str, Any]:
+        """Read current inverter settings.
+
+        Returns:
+            Dictionary of current settings with proper defaults if read fails
+        """
+        # Register map for configuration settings
+        SETTING_REGISTERS = {
+            "battery_capacity": 0xE002,  # Battery rated capacity (Ah)
+            "battery_voltage": 0xE003,  # Battery system voltage (V)
+            "output_priority": 0xE204,  # Output priority mode
+            "charge_source_priority": 0xE20F,  # Charge source priority
+            "discharge_stop_soc": 0xE00F,  # Discharge stop SOC (%)
+            "switch_to_ac_soc": 0xE01F,  # Switch to AC SOC (%)
+            "switch_to_battery_soc": 0xE020,  # Switch to battery SOC (%)
+        }
+
+        settings = {}
+        test_coordinator = None
+
+        try:
+            # Create temporary coordinator for reading
+            test_coordinator = await self._create_test_coordinator()
+            if not test_coordinator:
+                _LOGGER.warning("Could not create test coordinator, using defaults")
+                return self._get_default_settings()
+
+            # Read each register
+            for setting_name, register in SETTING_REGISTERS.items():
+                try:
+                    value = await test_coordinator.async_read_register(register)
+                    if value is not None and value != 0x2D2D:
+                        settings[setting_name] = value
+                        _LOGGER.debug(
+                            "Read %s from register 0x%04X = %s",
+                            setting_name,
+                            register,
+                            value,
+                        )
+                    else:
+                        _LOGGER.debug(
+                            "Could not read %s (register 0x%04X), using default",
+                            setting_name,
+                            register,
+                        )
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Error reading %s from register 0x%04X: %s",
+                        setting_name,
+                        register,
+                        err,
+                    )
+
+        except Exception as err:
+            _LOGGER.error("Failed to read current settings: %s", err)
+
+        finally:
+            # Cleanup
+            if test_coordinator:
+                await self._cleanup_test_coordinator(test_coordinator)
+
+        # Merge with defaults for any missing values
+        defaults = self._get_default_settings()
+        defaults.update(settings)
+
+        return defaults
+
+    def _get_default_settings(self) -> dict[str, Any]:
+        """Get default settings as fallback.
+
+        Returns:
+            Dictionary of default settings
+        """
+        return {
+            "battery_capacity": 100,  # 100Ah default
+            "battery_voltage": 48,  # 48V default
+            "output_priority": 2,  # SBU default
+            "charge_source_priority": 0,  # PV Priority default
+            "discharge_stop_soc": 10,  # 10% default
+            "switch_to_ac_soc": 20,  # 20% default
+            "switch_to_battery_soc": 80,  # 80% default
+        }
 
     async def async_step_detection_review(
         self, user_input: dict[str, Any] | None = None
@@ -399,9 +622,14 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema_dict = {}
         for feature, detected in self._onboarding_context.detected_features.items():
-            feature.replace("_", " ").title()
+            # Format feature name for display
+            feature_name = feature.replace("_", " ").title()
+
+            # Use selector with proper name for display
             schema_dict[vol.Optional(f"override_{feature}", default=detected)] = (
-                cv.boolean
+                selector.BooleanSelector(
+                    selector.BooleanSelectorConfig()
+                )
             )
         return vol.Schema(schema_dict)
 
@@ -490,7 +718,13 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._state_machine.transition(OnboardingState.VALIDATION)
             return await self.async_step_validation()
 
-        # Build dynamic form based on user level
+        # Read current values from inverter if not already loaded
+        if not hasattr(self, "_current_values"):
+            _LOGGER.info("Reading current settings from inverter...")
+            self._current_values = await self._read_current_settings()
+            _LOGGER.debug("Current settings: %s", self._current_values)
+
+        # Build dynamic form based on user level with current values
         schema = self._build_manual_config_schema()
 
         return self.async_show_form(
@@ -506,54 +740,76 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema_dict = {}
         user_level = self._onboarding_context.user_level
 
+        # Get current values (or defaults if not loaded)
+        current = getattr(self, "_current_values", self._get_default_settings())
+
         # Battery settings (always shown)
-        schema_dict[vol.Required("battery_capacity", default=100)] = vol.All(
-            vol.Coerce(int), vol.Range(min=10, max=400)
-        )
-        schema_dict[vol.Required("battery_voltage", default="48")] = vol.In(
-            ["12", "24", "36", "48"]
-        )
+        schema_dict[
+            vol.Required(
+                "battery_capacity", default=current.get("battery_capacity", 100)
+            )
+        ] = vol.All(vol.Coerce(int), vol.Range(min=10, max=400))
+
+        schema_dict[
+            vol.Required(
+                "battery_voltage", default=str(current.get("battery_voltage", 48))
+            )
+        ] = vol.In(["12", "24", "36", "48"])
 
         # Output priority
-        schema_dict[vol.Required("output_priority", default="2")] = (
-            selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[
-                        {"value": "0", "label": "Solar First"},
-                        {"value": "1", "label": "Mains First"},
-                        {"value": "2", "label": "SBU (Solar-Battery-Utility)"},
-                    ],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
+        schema_dict[
+            vol.Required(
+                "output_priority", default=str(current.get("output_priority", 2))
+            )
+        ] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    {"value": "0", "label": "Solar First"},
+                    {"value": "1", "label": "Mains First"},
+                    {"value": "2", "label": "SBU (Solar-Battery-Utility)"},
+                ],
+                mode=selector.SelectSelectorMode.DROPDOWN,
             )
         )
 
         # Charge source priority
-        schema_dict[vol.Required("charge_source_priority", default="0")] = (
-            selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[
-                        {"value": "0", "label": "PV Priority (AC Backup)"},
-                        {"value": "1", "label": "AC Priority"},
-                        {"value": "2", "label": "Hybrid Mode"},
-                        {"value": "3", "label": "PV Only"},
-                    ],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
+        schema_dict[
+            vol.Required(
+                "charge_source_priority",
+                default=str(current.get("charge_source_priority", 0)),
+            )
+        ] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    {"value": "0", "label": "PV Priority (AC Backup)"},
+                    {"value": "1", "label": "AC Priority"},
+                    {"value": "2", "label": "Hybrid Mode"},
+                    {"value": "3", "label": "PV Only"},
+                ],
+                mode=selector.SelectSelectorMode.DROPDOWN,
             )
         )
 
         # SOC thresholds (advanced/expert)
         if user_level in ["advanced", "expert"]:
-            schema_dict[vol.Optional("discharge_stop_soc", default=20)] = vol.All(
-                vol.Coerce(int), vol.Range(min=0, max=100)
-            )
-            schema_dict[vol.Optional("switch_to_ac_soc", default=10)] = vol.All(
-                vol.Coerce(int), vol.Range(min=0, max=100)
-            )
-            schema_dict[vol.Optional("switch_to_battery_soc", default=80)] = vol.All(
-                vol.Coerce(int), vol.Range(min=1, max=100)
-            )
+            schema_dict[
+                vol.Optional(
+                    "discharge_stop_soc", default=current.get("discharge_stop_soc", 20)
+                )
+            ] = vol.All(vol.Coerce(int), vol.Range(min=0, max=100))
+
+            schema_dict[
+                vol.Optional(
+                    "switch_to_ac_soc", default=current.get("switch_to_ac_soc", 10)
+                )
+            ] = vol.All(vol.Coerce(int), vol.Range(min=0, max=100))
+
+            schema_dict[
+                vol.Optional(
+                    "switch_to_battery_soc",
+                    default=current.get("switch_to_battery_soc", 80),
+                )
+            ] = vol.All(vol.Coerce(int), vol.Range(min=1, max=100))
 
         # Expert-only settings
         if user_level == "expert":
@@ -697,25 +953,12 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "Higher rates may reduce battery lifespan."
                 )
 
-        # Output priority validation with detected features
-        output_priority = settings.get("output_priority")
-        has_grid = self._onboarding_context.active_features.get("grid_tie", False)
-
-        if output_priority in ["0", "1"] and not has_grid:
-            warnings.append(
-                "Output priority set to use grid power, but grid-tie feature not detected. "
-                "System may not function as expected. "
-                "Consider using 'SBU' (Solar-Battery-Utility) priority instead."
-            )
-
-        # Charge source validation
-        charge_source = settings.get("charge_source_priority")
-        if charge_source in ["0", "1", "2"] and not has_grid:
-            warnings.append(
-                "Charge source priority includes AC charging, but grid connection not detected. "
-                "System will only charge from solar. "
-                "Consider using 'PV Only' if you have no grid connection."
-            )
+        # Note: AC input (charging from grid) is a basic feature of hybrid inverters
+        # and works independently of grid-tie (export) capability.
+        # The grid_tie feature specifically refers to feeding power BACK to the grid,
+        # not consuming power FROM the grid.
+        # Therefore, we don't need to warn about AC-related settings just because
+        # grid_tie is not detected.
 
         # Battery voltage consistency check
         if battery_voltage:
@@ -769,6 +1012,18 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
             # Log configuration summary for troubleshooting
+            _LOGGER.info(
+                "=== CREATING CONFIG ENTRY ==="
+            )
+            _LOGGER.info(
+                "detected_features (%d features): %s",
+                len(self._onboarding_context.detected_features),
+                self._onboarding_context.detected_features,
+            )
+            _LOGGER.info(
+                "detection_method: %s",
+                self._onboarding_context.detection_method,
+            )
             _LOGGER.debug(
                 "Final configuration: detected_features=%s, settings=%s",
                 self._onboarding_context.detected_features,

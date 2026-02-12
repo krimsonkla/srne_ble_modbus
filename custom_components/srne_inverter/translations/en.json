@@ -29,7 +29,27 @@
       },
       "detection_review": {
         "title": "Hardware Detection Results",
-        "description": "{detected_features}\n\nReview the detected capabilities above. Click Submit to continue with setup."
+        "description": "{detected_features}\n\nReview the detected capabilities above. Click Submit to continue with setup.",
+        "data": {
+          "override_grid_tie": "Grid-Tie Operation",
+          "override_diesel_mode": "Diesel Generator Mode",
+          "override_three_phase": "Three-Phase Power",
+          "override_split_phase": "Split-Phase Output",
+          "override_parallel_operation": "Parallel Operation",
+          "override_timed_operation": "Timed Charging/Discharging",
+          "override_advanced_output": "Advanced Output Control",
+          "override_customized_models": "Custom Model Support"
+        },
+        "data_description": {
+          "override_grid_tie": "Enable if your inverter supports grid-tied operation with export capability",
+          "override_diesel_mode": "Enable if you use diesel generator input for AC charging",
+          "override_three_phase": "Enable if your inverter outputs three-phase power (L1, L2, L3)",
+          "override_split_phase": "Enable if your inverter outputs split-phase (120V/240V)",
+          "override_parallel_operation": "Enable if you have multiple inverters working in parallel",
+          "override_timed_operation": "Enable if your inverter supports scheduled charging/discharging windows",
+          "override_advanced_output": "Enable advanced output priority and transfer settings",
+          "override_customized_models": "Enable for inverters with custom firmware or non-standard configurations"
+        }
       },
       "preset_selection": {
         "title": "Choose Configuration Preset",

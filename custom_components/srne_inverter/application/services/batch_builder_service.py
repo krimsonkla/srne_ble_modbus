@@ -493,15 +493,12 @@ class BatchBuilderService:
                 )
                 continue
 
-            _LOGGER.debug(
-                "Processing register %d/%d: %s at 0x%04X (length=%d, end=0x%04X)",
-                i + 1,
-                len(registers),
-                reg_def.name,
-                address,
-                length,
-                reg_end_address,
-            )
+            # Verbose per-register logging removed - use batch-level summary instead
+            # Uncomment for deep debugging of specific register issues:
+            # _LOGGER.debug(
+            #     "Processing register %d/%d: %s at 0x%04X (length=%d, end=0x%04X)",
+            #     i + 1, len(registers), reg_def.name, address, length, reg_end_address,
+            # )
 
             # Mark addresses as covered by this register (for multi-register values)
             for addr in range(address, reg_end_address + 1):

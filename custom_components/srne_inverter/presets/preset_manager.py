@@ -139,6 +139,35 @@ TIME_OF_USE = ConfigurationPreset(
     ],
 )
 
+BATTERY_ONLY = ConfigurationPreset(
+    id="battery_only",
+    name="Battery-Only (No PV)",
+    description="Battery-first operation with AC charging only - no solar panels",
+    icon="mdi:battery-heart",
+    settings={
+        "output_priority": 2,  # SBU (Battery → Utility) - battery is primary power
+        "charge_source_priority": 1,  # AC Priority - charge from grid when available
+        "discharge_stop_soc": 25,  # Protect battery from deep discharge
+        "switch_to_ac_soc": 30,  # Switch to AC when battery gets low
+        "switch_to_battery_soc": 85,  # Return to battery when charged enough
+        "pv_power_priority": 0,  # Charge battery first (though no PV exists)
+    },
+    use_cases=[
+        "Systems without solar panels (battery + grid only)",
+        "Intermittent grid power - use battery when grid is unavailable",
+        "Reduce peak demand by running on battery during high-usage periods",
+        "Emergency backup power with automatic charging when grid returns",
+    ],
+    warnings=[
+        "No solar charging - battery will only charge from AC grid",
+        "Grid must be available periodically to recharge batteries",
+        "Battery will discharge to loads continuously when grid is unavailable",
+        "Size battery capacity for expected grid outage duration",
+        "Monitor battery SOC regularly to prevent over-discharge",
+        "Consider adding solar panels for more sustainable operation",
+    ],
+)
+
 
 # ============================================================================
 # PRESET MANAGER
@@ -176,7 +205,7 @@ class PresetManager:
 
     def _load_builtin_presets(self) -> None:
         """Load built-in configuration presets."""
-        for preset in [OFF_GRID_SOLAR, GRID_TIED_SOLAR, UPS_MODE, TIME_OF_USE]:
+        for preset in [OFF_GRID_SOLAR, GRID_TIED_SOLAR, UPS_MODE, TIME_OF_USE, BATTERY_ONLY]:
             self._presets[preset.id] = preset
             _LOGGER.debug("Loaded built-in preset: %s", preset.name)
 

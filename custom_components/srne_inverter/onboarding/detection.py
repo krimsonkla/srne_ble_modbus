@@ -173,6 +173,7 @@ class FeatureDetector:
 
         Args:
             device_name: Device name (e.g., "E6048", "E60M48", "E60G48")
+                        or serial number (e.g., "E60000231107692658")
 
         Returns:
             Dictionary of inferred feature availability
@@ -188,19 +189,32 @@ class FeatureDetector:
             "customized_models": False,
         }
 
-        name_upper = device_name.upper()
+        # Extract model from serial number if needed
+        # Serial numbers like "E60000231107692658" contain model "E60" at start
+        # Patterns: E60, E60G, E60M, E60T (letter + 2-3 digits + optional letter suffix)
+        import re
 
-        # Grid-tie detection (G suffix)
-        if "G" in name_upper or "GRID" in name_upper:
+        # Try to match model pattern (e.g., E60, E60G48, etc.)
+        # Match: 1-2 letters, 2-3 digits, optional single letter
+        model_match = re.match(r'^([A-Z]{1,2}\d{2,3}[GMT]?)', device_name.upper())
+        if model_match:
+            model = model_match.group(1)
+            _LOGGER.debug("Extracted model '%s' from device name '%s'", model, device_name)
+        else:
+            model = device_name.upper()
+            _LOGGER.debug("Using full device name as model: '%s'", model)
+
+        # Grid-tie detection (G suffix or G in model)
+        if "G" in model or "GRID" in model:
             features["grid_tie"] = True
 
         # Three-phase detection (T suffix or 3P)
-        if "T" in name_upper or "3P" in name_upper:
+        if "T" in model or "3P" in model:
             features["three_phase"] = True
 
         # Split-phase detection (M suffix)
-        if "M" in name_upper or "SPLIT" in name_upper:
+        if "M" in model or "SPLIT" in model:
             features["split_phase"] = True
 
-        _LOGGER.debug("Inferred features from model '%s': %s", device_name, features)
+        _LOGGER.debug("Inferred features from model '%s' (device: '%s'): %s", model, device_name, features)
         return features
