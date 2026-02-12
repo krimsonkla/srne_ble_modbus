@@ -79,7 +79,7 @@
       },
       "review": {
         "title": "Review Configuration",
-        "description": "{review_text}\n\n⚠️ Warnings:\n{warnings}\n\nClick Submit to complete setup."
+        "description": "{review_text}\n\n⚠️ Warnings:\n{warnings}\n\nClick Submit to complete setup.\n\nFirst setup may take a few minutes."
       }
     },
     "error": {

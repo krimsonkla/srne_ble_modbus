@@ -427,6 +427,107 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         _LOGGER.debug("Test read register 0x%04X error: %s", register, err)
                         return None
 
+                async def async_write_register(
+                    self, register: int, value: int, password: int | None = None
+                ) -> bool:
+                    """Write a single register value using protocol.
+
+                    Args:
+                        register: Register address to write
+                        value: Value to write
+                        password: Optional password for protected registers
+
+                    Returns:
+                        True if write succeeded, False otherwise
+                    """
+                    try:
+                        # Ensure connected
+                        if not self._transport.is_connected:
+                            await self._connection_manager.ensure_connected(self._address)
+
+                        # Authenticate with password if provided
+                        if password is not None and password != 0:
+                            PASSWORD_REGISTER = 0xE203
+                            _LOGGER.info(
+                                "Authenticating with password for register 0x%04X",
+                                register,
+                            )
+
+                            # Write password to password register
+                            password_frame = self._protocol.build_write_command(
+                                address=PASSWORD_REGISTER,
+                                value=password,
+                            )
+
+                            password_response = await self._transport.send(password_frame)
+
+                            if not password_response:
+                                _LOGGER.error("Password authentication failed - no response")
+                                return False
+
+                            # Decode password response
+                            password_decoded = self._protocol.decode_response(
+                                password_response
+                            )
+
+                            if "error" in password_decoded:
+                                _LOGGER.error(
+                                    "Password authentication failed: %s",
+                                    password_decoded,
+                                )
+                                return False
+
+                            _LOGGER.debug("Password authentication successful")
+
+                        # Build Modbus write request using protocol
+                        request_frame = self._protocol.build_write_command(
+                            address=register,
+                            value=value,
+                        )
+
+                        # Send request and get response
+                        response = await self._transport.send(request_frame)
+
+                        if not response:
+                            return False
+
+                        # Decode response using protocol
+                        decoded = self._protocol.decode_response(response)
+
+                        # Check for error response
+                        if "error" in decoded:
+                            _LOGGER.warning(
+                                "Write register 0x%04X = %d failed: %s",
+                                register,
+                                value,
+                                decoded,
+                            )
+                            return False
+
+                        # Verify the write succeeded (response contains register and value)
+                        if decoded and register in decoded:
+                            written_value = decoded[register]
+                            if written_value == value:
+                                return True
+                            else:
+                                _LOGGER.warning(
+                                    "Write verification failed: wrote %d but read back %d",
+                                    value,
+                                    written_value,
+                                )
+                                return False
+
+                        return True
+
+                    except Exception as err:
+                        _LOGGER.error(
+                            "Test write register 0x%04X = %d error: %s",
+                            register,
+                            value,
+                            err,
+                        )
+                        return False
+
             test_coord = TestCoordinator(
                 protocol,
                 transport,
@@ -541,6 +642,137 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "switch_to_battery_soc": 80,  # 80% default
         }
 
+    async def _write_settings_to_inverter(self) -> dict[str, Any]:
+        """Write configuration settings to inverter.
+
+        Only writes settings that have changed from current values.
+
+        Returns:
+            Dictionary with write results: success, applied, failed
+        """
+        from ..const import COMMAND_DELAY_WRITE
+
+        # Register map for configuration settings
+        SETTING_REGISTERS = {
+            "battery_capacity": 0xE002,
+            "battery_voltage": 0xE003,
+            "output_priority": 0xE204,
+            "charge_source_priority": 0xE20F,
+            "discharge_stop_soc": 0xE00F,
+            "switch_to_ac_soc": 0xE01F,
+            "switch_to_battery_soc": 0xE020,
+        }
+
+        # Protected register range (requires password)
+        PROTECTED_REGISTER_START = 0xE000
+        PROTECTED_REGISTER_END = 0xE0FF
+
+        applied = []
+        failed = []
+        test_coordinator = None
+
+        try:
+            # Create temporary coordinator for writing
+            test_coordinator = await self._create_test_coordinator()
+            if not test_coordinator:
+                return {
+                    "success": False,
+                    "applied": [],
+                    "failed": ["Could not create coordinator"],
+                }
+
+            # Get password from settings
+            password = self._onboarding_context.custom_settings.get(
+                "inverter_password", 1111
+            )
+
+            # Get current values to compare
+            current = getattr(self, "_current_values", self._get_default_settings())
+
+            # Write each changed setting
+            for setting_name, new_value in self._onboarding_context.custom_settings.items():
+                # Skip if not a register setting
+                if setting_name not in SETTING_REGISTERS:
+                    continue
+
+                # Convert to int for comparison
+                try:
+                    new_value_int = int(new_value)
+                    current_value = current.get(setting_name)
+
+                    # Skip if value hasn't changed
+                    if current_value == new_value_int:
+                        _LOGGER.debug(
+                            "Skipping %s - value unchanged (%s)",
+                            setting_name,
+                            new_value_int,
+                        )
+                        continue
+
+                    # Write the setting
+                    register = SETTING_REGISTERS[setting_name]
+                    _LOGGER.info(
+                        "Writing %s = %s to register 0x%04X (was %s)",
+                        setting_name,
+                        new_value_int,
+                        register,
+                        current_value,
+                    )
+
+                    # Check if register is protected and needs authentication
+                    is_protected = (
+                        PROTECTED_REGISTER_START <= register <= PROTECTED_REGISTER_END
+                    )
+
+                    # Write to inverter (with password if protected)
+                    success = await test_coordinator.async_write_register(
+                        register, new_value_int, password if is_protected else None
+                    )
+
+                    if success:
+                        applied.append(setting_name)
+                        _LOGGER.info(
+                            "Successfully wrote %s = %d to register 0x%04X",
+                            setting_name,
+                            new_value_int,
+                            register,
+                        )
+                    else:
+                        failed.append((setting_name, "Write failed"))
+                        _LOGGER.error(
+                            "Failed to write %s = %d to register 0x%04X",
+                            setting_name,
+                            new_value_int,
+                            register,
+                        )
+
+                    # Add delay between writes
+                    await asyncio.sleep(COMMAND_DELAY_WRITE)
+
+                except (ValueError, TypeError) as err:
+                    _LOGGER.error(
+                        "Failed to write %s: invalid value %s - %s",
+                        setting_name,
+                        new_value,
+                        err,
+                    )
+                    failed.append((setting_name, str(err)))
+
+        except Exception as err:
+            _LOGGER.error("Failed to write settings: %s", err)
+            failed.append(("general", str(err)))
+
+        finally:
+            # Cleanup
+            if test_coordinator:
+                await self._cleanup_test_coordinator(test_coordinator)
+
+        return {
+            "success": len(failed) == 0,
+            "applied": applied,
+            "failed": failed,
+        }
+
     async def async_step_detection_review(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -644,11 +876,15 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._onboarding_context.selected_preset = preset_key
             self._onboarding_context.mark_step_complete("preset_selection")
 
-            # Apply preset settings
-            preset_settings = CONFIGURATION_PRESETS[preset_key]["settings"]
-            self._onboarding_context.custom_settings = preset_settings.copy()
-
-            _LOGGER.info("User selected preset: %s", preset_key)
+            # Check if user chose to skip preset selection
+            if preset_key == "skip":
+                # Don't apply any preset - user will use current/default inverter settings
+                _LOGGER.info("User skipped preset selection - using current inverter settings")
+            else:
+                # Apply preset settings
+                preset_settings = CONFIGURATION_PRESETS[preset_key]["settings"]
+                self._onboarding_context.custom_settings = preset_settings.copy()
+                _LOGGER.info("User selected preset: %s", preset_key)
 
             # Proceed to validation
             self._state_machine.transition(OnboardingState.VALIDATION)
@@ -657,13 +893,21 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Filter presets based on detected features
         available_presets = self._filter_presets_by_features()
 
-        # Build preset selection form
+        # Build preset selection form - add skip option first
         preset_options = [
+            selector.SelectOptionDict(
+                value="skip",
+                label="Skip - Use Current Inverter Settings"
+            ),
+        ]
+
+        # Add available presets
+        preset_options.extend([
             selector.SelectOptionDict(
                 value=key, label=f"{preset['name']} - {preset['description']}"
             )
             for key, preset in available_presets.items()
-        ]
+        ])
 
         return self.async_show_form(
             step_id="preset_selection",
@@ -811,6 +1055,12 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ] = vol.All(vol.Coerce(int), vol.Range(min=1, max=100))
 
+        # Password for write operations (advanced/expert)
+        if user_level in ["advanced", "expert"]:
+            schema_dict[
+                vol.Optional("inverter_password", default=1111)
+            ] = vol.All(vol.Coerce(int), vol.Range(min=0, max=9999999))
+
         # Expert-only settings
         if user_level == "expert":
             schema_dict[vol.Optional("enable_diagnostic_sensors", default=True)] = (
@@ -911,6 +1161,12 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         warnings = []
         settings = self._onboarding_context.custom_settings
 
+        # If user chose to skip preset (use current settings), don't show warnings
+        # Only validate for errors in case settings are truly invalid
+        skip_warnings = (
+            self._onboarding_context.selected_preset == "skip"
+        )
+
         # Validate SOC order if present
         discharge_stop = settings.get("discharge_stop_soc", 0)
         switch_ac = settings.get("switch_to_ac_soc", 0)
@@ -942,7 +1198,7 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         battery_capacity = settings.get("battery_capacity")
         max_charge = settings.get("max_charge_current")
 
-        if battery_capacity and max_charge:
+        if battery_capacity and max_charge and not skip_warnings:
             # Recommend max charge current <= 0.5C (C/2)
             safe_max = battery_capacity * 0.5
             if max_charge > safe_max:
@@ -961,7 +1217,7 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # grid_tie is not detected.
 
         # Battery voltage consistency check
-        if battery_voltage:
+        if battery_voltage and not skip_warnings:
             device_name = self._onboarding_context.device_name
             # Check common voltage indicators in device name
             if "48V" in device_name.upper() and battery_voltage != "48":
@@ -976,7 +1232,7 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
         # Low discharge SOC warning
-        if discharge_stop and discharge_stop < 10:
+        if discharge_stop and discharge_stop < 10 and not skip_warnings:
             warnings.append(
                 f"Discharge stop SOC set to {discharge_stop}%, which is below 10%. "
                 "This may significantly reduce battery lifespan. "
@@ -984,7 +1240,7 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         # High switch to battery SOC warning
-        if switch_battery and switch_battery > 90:
+        if switch_battery and switch_battery > 90 and not skip_warnings:
             warnings.append(
                 f"Switch to battery SOC set to {switch_battery}%, which is above 90%. "
                 "This may cause frequent switching between AC and battery. "
@@ -1002,6 +1258,24 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Review and confirm configuration before writing."""
         if user_input is not None:
+            # Write changed settings to inverter before creating entry
+            if self._onboarding_context.custom_settings:
+                _LOGGER.info("Writing configuration changes to inverter...")
+                write_result = await self._write_settings_to_inverter()
+
+                if not write_result["success"]:
+                    _LOGGER.warning(
+                        "Some settings failed to write: %s",
+                        write_result["failed"],
+                    )
+                    # Continue anyway - settings are stored in config entry
+                    # and can be retried later via options flow
+                else:
+                    _LOGGER.info(
+                        "Successfully wrote %d settings to inverter",
+                        len(write_result["applied"]),
+                    )
+
             # User confirmed - create entry
             self._onboarding_context.mark_completed()
 
@@ -1030,6 +1304,18 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._onboarding_context.custom_settings,
             )
 
+            # Extract password from settings (store in data, not options)
+            password = self._onboarding_context.custom_settings.get(
+                "inverter_password", 1111
+            )
+
+            # Remove password from options (will be in data instead)
+            options = {
+                k: v
+                for k, v in self._onboarding_context.custom_settings.items()
+                if k != "inverter_password"
+            }
+
             # Create entry with complete metadata
             return self.async_create_entry(
                 title=self._onboarding_context.device_name,
@@ -1041,8 +1327,9 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "detection_timestamp": self._onboarding_context.detection_timestamp,
                     "onboarding_completed": True,
                     "onboarding_duration": self._onboarding_context.total_duration,
+                    "inverter_password": password,
                 },
-                options=self._onboarding_context.custom_settings,
+                options=options,
             )
 
         # Build review display
@@ -1072,10 +1359,13 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         settings = self._onboarding_context.custom_settings
 
         if self._onboarding_context.selected_preset:
-            preset = CONFIGURATION_PRESETS.get(
-                self._onboarding_context.selected_preset, {}
-            )
-            lines.append(f"Preset: {preset.get('name', 'Unknown')}\n")
+            if self._onboarding_context.selected_preset == "skip":
+                lines.append("Preset: None (using current inverter settings)\n")
+            else:
+                preset = CONFIGURATION_PRESETS.get(
+                    self._onboarding_context.selected_preset, {}
+                )
+                lines.append(f"Preset: {preset.get('name', 'Unknown')}\n")
 
         for key, value in settings.items():
             label = key.replace("_", " ").title()
