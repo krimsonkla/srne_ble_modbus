@@ -153,7 +153,8 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         # Calculate learned timeouts for known operations
-        operations = ["ble_send", "modbus_read"]
+        # Note: BLE send includes the full Modbus transaction (write + read)
+        operations = ["ble_send"]
         new_timeouts = {}
 
         for operation in operations:

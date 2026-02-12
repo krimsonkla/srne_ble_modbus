@@ -29,7 +29,6 @@ from ...const import (
     BLE_NOTIFY_RETRY_DELAY,
     BLE_DISCONNECT_TIMEOUT,
     BLE_CONNECTION_TIMEOUT,
-    BLE_WRITE_PROCESSING_DELAY,
     BLE_DISCOVERY_TIMEOUT,
     MODBUS_RESPONSE_TIMEOUT,
     MAX_CONSECUTIVE_TIMEOUTS,
@@ -389,20 +388,9 @@ class BLETransport(ITransport):
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug("Write acknowledged by device (response=True completed)")
 
-            # Step 1.5: CRITICAL - Wait for device to process command
-            # The device needs time to:
-            # 1. Process the Modbus command (20-50ms)
-            # 2. Update the WRITE_UUID characteristic value (10ms)
-            # 3. Prepare the notification (20ms)
-            # Without this delay, read_gatt_char may return STALE data from previous operations.
-            # Using BLE_WRITE_PROCESSING_DELAY from const.py for tuning
-            await asyncio.sleep(BLE_WRITE_PROCESSING_DELAY)
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug(
-                    "Waited %.3fs for device processing", BLE_WRITE_PROCESSING_DELAY
-                )
-
             # Step 2: Read characteristic to get result code
+            # Note: BLE_WRITE_PROCESSING_DELAY removed (2026-02-11) - testing showed
+            # the delay was unnecessary. The BLE stack and device handle timing correctly.
             result_code = await self._client.read_gatt_char(BLE_WRITE_UUID)
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug(
@@ -471,7 +459,7 @@ class BLETransport(ITransport):
             if self._timing_collector:
                 duration_ms = (time.time() - timing_start) * 1000
                 self._timing_collector.record(
-                    operation='ble_modbus_send',
+                    operation='ble_send',
                     duration_ms=duration_ms,
                     success=True,
                     metadata={'timeout': timeout}
@@ -494,7 +482,7 @@ class BLETransport(ITransport):
             if self._timing_collector:
                 duration_ms = (time.time() - timing_start) * 1000
                 self._timing_collector.record(
-                    operation='ble_modbus_send',
+                    operation='ble_send',
                     duration_ms=duration_ms,
                     success=False,
                     metadata={'timeout': timeout, 'error': 'timeout'}
@@ -511,7 +499,7 @@ class BLETransport(ITransport):
             if self._timing_collector:
                 duration_ms = (time.time() - timing_start) * 1000
                 self._timing_collector.record(
-                    operation='ble_modbus_send',
+                    operation='ble_send',
                     duration_ms=duration_ms,
                     success=False,
                     metadata={'timeout': timeout, 'error': 'rejected'}
@@ -530,7 +518,7 @@ class BLETransport(ITransport):
             if self._timing_collector:
                 duration_ms = (time.time() - timing_start) * 1000
                 self._timing_collector.record(
-                    operation='ble_modbus_send',
+                    operation='ble_send',
                     duration_ms=duration_ms,
                     success=False,
                     metadata={'timeout': timeout, 'error': 'ble_connection'}
@@ -548,7 +536,7 @@ class BLETransport(ITransport):
             if self._timing_collector:
                 duration_ms = (time.time() - timing_start) * 1000
                 self._timing_collector.record(
-                    operation='ble_modbus_send',
+                    operation='ble_send',
                     duration_ms=duration_ms,
                     success=False,
                     metadata={'timeout': timeout, 'error': 'unexpected'}

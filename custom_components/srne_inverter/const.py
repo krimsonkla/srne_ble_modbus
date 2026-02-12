@@ -34,74 +34,40 @@ BLE_NOTIFY_UUID = "53300005-0023-4BD4-BBD5-A6920E4C5653"
 # TIMING CONSTANTS
 # ============================================================================
 # All timing constants are in SECONDS unless explicitly noted.
-# BLE Modbus communication requires careful timing for reliable operation.
-#
-# PHASE 1: CONSERVATIVE DEFAULTS (2026-02-11)
-# Setting conservative timeouts to accommodate slow hardware (Raspberry Pi 3B+).
-# These values prioritize reliability over performance:
-# - Longer timeouts reduce false positives from slow BLE adapters
-# - Higher circuit breaker threshold allows more retry attempts
-# - Extended discovery timeout handles slower BLE scanning
-#
-# Previous optimized values (for reference):
-# - MODBUS_RESPONSE_TIMEOUT: 0.7s (now 1.5s)
-# - BLE_COMMAND_TIMEOUT: 0.5s (now 1.0s)
-# - BLE_CONNECTION_TIMEOUT: 3.0s (now 5.0s)
-# - MAX_CONSECUTIVE_TIMEOUTS: 3 (now 5)
-# - discovery_timeout: 7.0s (now 15.0s in ble_transport.py)
-#
-# Next phases will add adaptive logic while maintaining these safe defaults.
 
-# BLE Communication Timing (all in seconds)
-BLE_COMMAND_TIMEOUT = 1.0  # Timeout for BLE command operations (was 0.5s)
-BLE_WRITE_PROCESSING_DELAY = (
-    0.03  # Device processing time after write (optimized: was 0.05s)
-)
-BLE_READ_DELAY = 0.05  # Small delay before read operation
+# BLE Communication Timing
+BLE_COMMAND_TIMEOUT = 1.5  # Timeout for BLE command operations
 BLE_NOTIFY_SUBSCRIBE_TIMEOUT = 1.0  # Timeout for notification subscription
-BLE_CONNECTION_TIMEOUT = 5.0  # Overall connection operation timeout (was 3.0s)
+BLE_CONNECTION_TIMEOUT = 5.0  # Overall connection operation timeout
 BLE_DISCONNECT_TIMEOUT = 0.5  # Timeout for disconnect operations
 BLE_NOTIFY_RETRY_DELAY = 0.25  # Delay between notification subscription retries
+BLE_DISCOVERY_TIMEOUT = 15.0  # Wait time for device discovery on HA restart
 
-# Modbus Protocol Timing (all in seconds)
-MODBUS_RESPONSE_TIMEOUT = 1.5  # Wait for Modbus response from device (was 0.7s)
-MODBUS_WRITE_TIMEOUT = 1  # Timeout for write operations (faster than read)
-MODBUS_RETRY_DELAY = 0.25  # Delay between retry attempts
+# Modbus Protocol Timing
+MODBUS_RESPONSE_TIMEOUT = 1.5  # Wait for Modbus response from device
+MODBUS_WRITE_TIMEOUT = 1  # Timeout for write operations
 
-# Command Delays (all in seconds)
-COMMAND_DELAY = 0.01  # Standard delay between commands (increased for stability)
-COMMAND_DELAY_WRITE = 0.01  # Delay after write operations (increased for stability)
-BATCH_READ_DELAY = 0.005  # Delay between batch read operations (optimized: was 0.01s)
-POWER_STATE_CHANGE_DELAY = (
-    5.0  # Delay after power state changes (converted from milliseconds)
-)
-WRITE_VERIFY_DELAY = (
-    0.05  # Delay before read-verify after write (inverter processing time)
-)
-WRITE_VERIFY_DELAY_UI = (
-    0.15  # Delay before read-verify in UI number entity (with safety margin)
-)
-
-# BLE Discovery
-BLE_DISCOVERY_TIMEOUT = 15.0  # Wait time for device discovery on HA restart (was 7.0s hardcoded)
+# Command Delays
+COMMAND_DELAY_WRITE = 0.01  # Delay after write operations in preset manager
+WRITE_VERIFY_DELAY_UI = 0.15  # Delay before read-verify in UI number entity
 
 # Circuit Breaker Configuration
-MAX_CONSECUTIVE_TIMEOUTS = 5  # Force reconnect after N consecutive timeouts (was 3)
+MAX_CONSECUTIVE_TIMEOUTS = 5  # Force reconnect after N consecutive timeouts
 
 # ============================================================================
-# ADAPTIVE TIMING CONSTANTS (PHASE 2)
+# ADAPTIVE TIMING CONSTANTS
 # ============================================================================
-# Configuration for timing measurement and adaptation infrastructure
+# Configuration for timing measurement and adaptive learning
 
 # Timing measurement configuration
-TIMING_SAMPLE_SIZE = 100  # Number of samples to keep for statistics (rolling window)
+TIMING_SAMPLE_SIZE = 100  # Number of samples to keep for statistics
 TIMING_MIN_SAMPLES = 20  # Minimum samples before calculating statistics
 
-# Learning algorithm configuration (Phase 3)
+# Learning algorithm configuration
 TIMING_PERCENTILE = 0.95  # Use 95th percentile for timeout calculation
-TIMING_SAFETY_MARGIN = 1.5  # 50% safety margin above measured P95
-TIMING_MIN_TIMEOUT = 0.5  # Minimum timeout in seconds (prevents too-aggressive timeouts)
-TIMING_MAX_TIMEOUT = 5.0  # Maximum timeout in seconds (prevents excessive waits)
+TIMING_SAFETY_MARGIN = 1.5  # Safety margin above measured P95
+TIMING_MIN_TIMEOUT = 0.5  # Minimum timeout in seconds
+TIMING_MAX_TIMEOUT = 5.0  # Maximum timeout in seconds
 
 # ============================================================================
 # MODBUS ERROR CODES
