@@ -201,8 +201,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     container = create_container(hass, entry, device_config)
     coordinator = container.coordinator
 
-    # Load previously failed registers before first refresh
-    await coordinator._load_failed_registers()
+    # Load all persistent storage (failed registers, learned timeouts) before first refresh
+    await coordinator._load_storage()
 
     # Perform first refresh
     # Exception handling pattern: ConfigEntryNotReady triggers HA's built-in retry

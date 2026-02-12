@@ -31,6 +31,7 @@ from .domain.helpers.transformations import convert_to_signed_int16
 from .const import (
     DEFAULT_SLAVE_ID,
     DOMAIN,
+    TIMING_SAMPLE_SIZE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -56,6 +57,8 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         batch_builder: Any = None,
         register_mapper: Any = None,
         transaction_manager: Any = None,
+        timing_collector: Any = None,
+        timeout_learner: Any = None,
     ) -> None:
         """Initialize the coordinator.
 
@@ -70,6 +73,8 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             batch_builder: Optional BatchBuilderService
             register_mapper: Optional RegisterMapperService
             transaction_manager: Optional TransactionManagerService
+            timing_collector: Optional TimingCollector for Phase 2 measurement
+            timeout_learner: Optional TimeoutLearner for Phase 3 learning
         """
         # Get update interval from options, default to 60s
         update_interval_seconds = entry.options.get("update_interval", 60)
@@ -96,6 +101,8 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._batch_builder = batch_builder
         self._register_mapper = register_mapper
         self._transaction_manager = transaction_manager
+        self._timing_collector = timing_collector
+        self._timeout_learner = timeout_learner
 
         # Device configuration and dynamic batching
         self._device_config = device_config
@@ -103,12 +110,16 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._failed_registers: set[int] = set()
         self._batches_need_rebuild = False
 
+        # Phase 4: Learned timeout persistence
+        self._learned_timeouts: dict[str, float] = {}
+        self._update_counter: int = 0
+
         # Dependency tracking for calculated sensors
         self._dependency_map: dict[str, list[str]] = {}
         self._unavailable_sensors: set[str] = set()
         self._build_dependency_map()
 
-        # Don't build batches here - will be built in _load_failed_registers() after loading storage
+        # Don't build batches here - will be built in _load_storage() after loading storage
         # This avoids processing all registers twice (once here, once after loading failed registers)
         self._register_batches = []
 
@@ -117,8 +128,67 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._address,
         )
 
-    async def _load_failed_registers(self) -> None:
-        """Load previously failed registers and unavailable sensors from storage."""
+    def _apply_learned_timeouts(self, learned_timeouts: dict[str, float]) -> None:
+        """Apply learned timeouts to transport (Phase 5: Runtime Application).
+
+        Args:
+            learned_timeouts: Dict mapping operation -> timeout (seconds)
+        """
+        if learned_timeouts and self._transport:
+            if hasattr(self._transport, "set_learned_timeouts"):
+                self._transport.set_learned_timeouts(learned_timeouts)
+                _LOGGER.info("Applied learned timeouts to transport")
+            else:
+                _LOGGER.debug(
+                    "Transport does not support learned timeouts (Phase 5 not active)"
+                )
+
+    async def _update_learned_timeouts(self) -> None:
+        """Calculate and update learned timeouts (Phase 3 + Phase 4).
+
+        Uses TimeoutLearner to calculate optimal timeouts from TimingCollector data.
+        Applies learned timeouts to transport and saves to storage.
+        """
+        if not self._timeout_learner:
+            return
+
+        # Calculate learned timeouts for known operations
+        operations = ["ble_send", "modbus_read"]
+        new_timeouts = {}
+
+        for operation in operations:
+            learned = self._timeout_learner.calculate_timeout(operation)
+            if learned:
+                new_timeouts[operation] = learned.timeout
+                _LOGGER.debug(
+                    "Learned timeout for %s: %.2fs (from %d samples, P95=%.2fms)",
+                    operation,
+                    learned.timeout,
+                    learned.based_on_samples,
+                    learned.p95_measured * 1000,
+                )
+
+        # Only update if we have new learned values
+        if new_timeouts:
+            # Check if timeouts changed significantly (>10% change)
+            should_save = False
+            for op, new_val in new_timeouts.items():
+                old_val = self._learned_timeouts.get(op)
+                if old_val is None or abs(new_val - old_val) / old_val > 0.1:
+                    should_save = True
+                    break
+
+            if should_save:
+                self._learned_timeouts.update(new_timeouts)
+                self._apply_learned_timeouts(self._learned_timeouts)
+                await self._save_storage()
+                _LOGGER.info(
+                    "Updated and saved learned timeouts: %s",
+                    {op: f"{val:.2f}s" for op, val in new_timeouts.items()},
+                )
+
+    async def _load_storage(self) -> None:
+        """Load all persistent storage (failed registers, unavailable sensors, learned timeouts)."""
         store = Store(self.hass, 1, f"{DOMAIN}_{self._entry.entry_id}_failed_registers")
 
         try:
@@ -205,6 +275,19 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             len(self._unavailable_sensors),
                             list(self._unavailable_sensors),
                         )
+
+                # Phase 4: Load and apply learned timeouts
+                if "learned_timeouts" in data:
+                    self._learned_timeouts = data["learned_timeouts"]
+                    if self._learned_timeouts:
+                        _LOGGER.info(
+                            "Loaded %d learned timeout(s) from storage: %s",
+                            len(self._learned_timeouts),
+                            {op: f"{val:.2f}s" for op, val in self._learned_timeouts.items()},
+                        )
+                        # Apply learned timeouts to transport (Phase 5: Runtime Application)
+                        self._apply_learned_timeouts(self._learned_timeouts)
+
         except Exception as err:
             _LOGGER.debug("No previous failed registers found: %s", err)
             self._failed_registers = set()
@@ -362,19 +445,21 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 len(self._failed_registers),
             )
 
-    async def _save_failed_registers(self) -> None:
-        """Save failed registers and unavailable sensors to storage."""
+    async def _save_storage(self) -> None:
+        """Save all persistent storage (failed registers, unavailable sensors, learned timeouts)."""
         store = Store(self.hass, 1, f"{DOMAIN}_{self._entry.entry_id}_failed_registers")
         try:
             unavailable_sensors = self._get_unavailable_sensors() if self.data else []
             self._unavailable_sensors = set(unavailable_sensors)
 
-            await store.async_save(
-                {
-                    "failed_registers": list(self._failed_registers),
-                    "unavailable_sensors": unavailable_sensors,
-                }
-            )
+            # Phase 4: Include learned timeouts in storage
+            storage_data = {
+                "failed_registers": list(self._failed_registers),
+                "unavailable_sensors": unavailable_sensors,
+                "learned_timeouts": self._learned_timeouts,
+            }
+
+            await store.async_save(storage_data)
 
             _LOGGER.info(
                 "Saved %d failed registers to storage: %s",
@@ -387,6 +472,13 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "%d calculated sensors unavailable due to missing dependencies: %s",
                     len(unavailable_sensors),
                     unavailable_sensors,
+                )
+
+            if self._learned_timeouts:
+                _LOGGER.debug(
+                    "Saved %d learned timeout(s): %s",
+                    len(self._learned_timeouts),
+                    {op: f"{val:.2f}s" for op, val in self._learned_timeouts.items()},
                 )
 
             self._rebuild_batches()
@@ -459,7 +551,12 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                     self._failed_registers.update(result.failed_registers)
                     # Save to persistent storage and rebuild batches
-                    await self._save_failed_registers()
+                    await self._save_storage()
+
+            # Phase 4: Periodic saving of learned timeouts (every 10 updates)
+            self._update_counter += 1
+            if self._update_counter % 10 == 0:
+                await self._update_learned_timeouts()
 
             return result.data
 

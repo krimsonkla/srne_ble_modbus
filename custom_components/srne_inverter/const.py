@@ -36,26 +36,35 @@ BLE_NOTIFY_UUID = "53300005-0023-4BD4-BBD5-A6920E4C5653"
 # All timing constants are in SECONDS unless explicitly noted.
 # BLE Modbus communication requires careful timing for reliable operation.
 #
-# TIMING OPTIMIZATION PHASE (2026-02-11):
-# Reduced timeouts based on empirical testing and performance profiling.
-# Testing showed 95% of responses arrive within 0.3-0.4s, allowing for
-# more aggressive timeouts while maintaining reliability. Circuit breaker
-# (MAX_CONSECUTIVE_TIMEOUTS=3) provides safety net for persistent failures.
-# Expected improvement: ~30% reduction in read cycle time (15.2s → 10.7s).
+# PHASE 1: CONSERVATIVE DEFAULTS (2026-02-11)
+# Setting conservative timeouts to accommodate slow hardware (Raspberry Pi 3B+).
+# These values prioritize reliability over performance:
+# - Longer timeouts reduce false positives from slow BLE adapters
+# - Higher circuit breaker threshold allows more retry attempts
+# - Extended discovery timeout handles slower BLE scanning
+#
+# Previous optimized values (for reference):
+# - MODBUS_RESPONSE_TIMEOUT: 0.7s (now 1.5s)
+# - BLE_COMMAND_TIMEOUT: 0.5s (now 1.0s)
+# - BLE_CONNECTION_TIMEOUT: 3.0s (now 5.0s)
+# - MAX_CONSECUTIVE_TIMEOUTS: 3 (now 5)
+# - discovery_timeout: 7.0s (now 15.0s in ble_transport.py)
+#
+# Next phases will add adaptive logic while maintaining these safe defaults.
 
 # BLE Communication Timing (all in seconds)
-BLE_COMMAND_TIMEOUT = 0.5  # Timeout for BLE command operations
+BLE_COMMAND_TIMEOUT = 1.0  # Timeout for BLE command operations (was 0.5s)
 BLE_WRITE_PROCESSING_DELAY = (
     0.03  # Device processing time after write (optimized: was 0.05s)
 )
 BLE_READ_DELAY = 0.05  # Small delay before read operation
 BLE_NOTIFY_SUBSCRIBE_TIMEOUT = 1.0  # Timeout for notification subscription
-BLE_CONNECTION_TIMEOUT = 3.0  # Overall connection operation timeout
+BLE_CONNECTION_TIMEOUT = 5.0  # Overall connection operation timeout (was 3.0s)
 BLE_DISCONNECT_TIMEOUT = 0.5  # Timeout for disconnect operations
 BLE_NOTIFY_RETRY_DELAY = 0.25  # Delay between notification subscription retries
 
 # Modbus Protocol Timing (all in seconds)
-MODBUS_RESPONSE_TIMEOUT = 0.7  # Wait for Modbus response from device
+MODBUS_RESPONSE_TIMEOUT = 1.5  # Wait for Modbus response from device (was 0.7s)
 MODBUS_WRITE_TIMEOUT = 1  # Timeout for write operations (faster than read)
 MODBUS_RETRY_DELAY = 0.25  # Delay between retry attempts
 
@@ -73,8 +82,26 @@ WRITE_VERIFY_DELAY_UI = (
     0.15  # Delay before read-verify in UI number entity (with safety margin)
 )
 
+# BLE Discovery
+BLE_DISCOVERY_TIMEOUT = 15.0  # Wait time for device discovery on HA restart (was 7.0s hardcoded)
+
 # Circuit Breaker Configuration
-MAX_CONSECUTIVE_TIMEOUTS = 3  # Force reconnect after N consecutive timeouts
+MAX_CONSECUTIVE_TIMEOUTS = 5  # Force reconnect after N consecutive timeouts (was 3)
+
+# ============================================================================
+# ADAPTIVE TIMING CONSTANTS (PHASE 2)
+# ============================================================================
+# Configuration for timing measurement and adaptation infrastructure
+
+# Timing measurement configuration
+TIMING_SAMPLE_SIZE = 100  # Number of samples to keep for statistics (rolling window)
+TIMING_MIN_SAMPLES = 20  # Minimum samples before calculating statistics
+
+# Learning algorithm configuration (Phase 3)
+TIMING_PERCENTILE = 0.95  # Use 95th percentile for timeout calculation
+TIMING_SAFETY_MARGIN = 1.5  # 50% safety margin above measured P95
+TIMING_MIN_TIMEOUT = 0.5  # Minimum timeout in seconds (prevents too-aggressive timeouts)
+TIMING_MAX_TIMEOUT = 5.0  # Maximum timeout in seconds (prevents excessive waits)
 
 # ============================================================================
 # MODBUS ERROR CODES

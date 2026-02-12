@@ -86,6 +86,11 @@ class DIContainer:
     entity_preference_service: Optional[Any] = None
     device_config_service: Optional[Any] = None
 
+    # Phase 2: Adaptive timing infrastructure
+    timing_collector: Optional[Any] = None
+    # Phase 3: Timeout learning
+    timeout_learner: Optional[Any] = None
+
 
 def create_container(
     hass: HomeAssistant,
@@ -124,10 +129,16 @@ def create_container(
     """
     container = DIContainer(hass=hass, entry=entry, config=config)
 
+    # Phase 2: Create timing collector for adaptive timing
+    container.timing_collector = _create_timing_collector()
+
+    # Phase 3: Create timeout learner (depends on timing collector)
+    container.timeout_learner = _create_timeout_learner(container.timing_collector)
+
     # Infrastructure Layer
     container.crc = _create_crc()
     container.protocol = _create_protocol(container.crc)
-    container.transport = _create_transport(hass)
+    container.transport = _create_transport(hass, container.timing_collector)
     container.connection_manager = _create_connection_manager(container.transport)
     container.failed_register_repo = _create_failed_register_repository(hass, entry)
 
@@ -166,6 +177,8 @@ def create_container(
         batch_builder=container.batch_builder_service,
         register_mapper=container.register_mapper_service,
         transaction_manager=container.transaction_manager_service,
+        timing_collector=container.timing_collector,
+        timeout_learner=container.timeout_learner,
     )
 
     # Additional services
@@ -204,18 +217,19 @@ def _create_protocol(crc: Any) -> Any:
     return ModbusRTUProtocol(crc)
 
 
-def _create_transport(hass: HomeAssistant) -> Any:
+def _create_transport(hass: HomeAssistant, timing_collector: Any = None) -> Any:
     """Create BLE transport.
 
     Args:
         hass: Home Assistant instance
+        timing_collector: Optional TimingCollector for Phase 2 measurement
 
     Returns:
         ITransport implementation (BLETransport)
     """
     from ..infrastructure.transport import BLETransport
 
-    return BLETransport(hass)
+    return BLETransport(hass, timing_collector=timing_collector)
 
 
 def _create_connection_manager(transport: Any) -> Any:
@@ -371,6 +385,8 @@ def _create_coordinator(
     batch_builder: Any,
     register_mapper: Any,
     transaction_manager: Any,
+    timing_collector: Any = None,
+    timeout_learner: Any = None,
 ) -> Any:
     """Create data update coordinator.
 
@@ -385,11 +401,13 @@ def _create_coordinator(
         batch_builder: Batch builder service
         register_mapper: Register mapper service
         transaction_manager: Transaction manager service
+        timing_collector: Optional TimingCollector for Phase 2 measurement
+        timeout_learner: Optional TimeoutLearner for Phase 3 learning
 
     Returns:
         Coordinator instance with injected dependencies
 
-    Coordinator now receives all application services
+    Coordinator now receives all application services including adaptive timing
     """
     from ..coordinator import SRNEDataUpdateCoordinator
 
@@ -404,10 +422,46 @@ def _create_coordinator(
         batch_builder=batch_builder,
         register_mapper=register_mapper,
         transaction_manager=transaction_manager,
+        timing_collector=timing_collector,
+        timeout_learner=timeout_learner,
     )
 
 
 # Additional Service Factory Functions
+
+
+def _create_timing_collector() -> Any:
+    """Create timing collector for Phase 2 adaptive timing.
+
+    Returns:
+        TimingCollector instance for measuring operation timings
+
+    Note:
+        Phase 2: Measurement Infrastructure
+        Collects timing data for future adaptive timeout optimization.
+    """
+    from ..application.services.timing_collector import TimingCollector
+    from ..const import TIMING_SAMPLE_SIZE
+
+    return TimingCollector(sample_size=TIMING_SAMPLE_SIZE)
+
+
+def _create_timeout_learner(timing_collector: Any) -> Any:
+    """Create timeout learner for Phase 3 adaptive timing.
+
+    Args:
+        timing_collector: TimingCollector instance for accessing measurements
+
+    Returns:
+        TimeoutLearner instance for calculating optimal timeouts
+
+    Note:
+        Phase 3: Learning Algorithm
+        Calculates optimal timeouts using P95 × 1.5 algorithm.
+    """
+    from ..application.services.timeout_learner import TimeoutLearner
+
+    return TimeoutLearner(collector=timing_collector)
 
 
 def _create_entity_registry_service(hass: HomeAssistant) -> Any:

@@ -668,6 +668,15 @@ class RefreshDataUseCase:
                     # Connection error during recursion - stop and return what we have
                     return data
 
+        # CRITICAL: Check connection again before trying second half
+        # If connection was lost during first half processing, stop here
+        if not self._transport.is_connected:
+            _LOGGER.warning(
+                "Transport disconnected after first half, skipping second half at 0x%04X",
+                second_half_start,
+            )
+            return data
+
         # Try second half
         second_register_map = {
             offset - mid: name for offset, name in register_map.items() if offset >= mid

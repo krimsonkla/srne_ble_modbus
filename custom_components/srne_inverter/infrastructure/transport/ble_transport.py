@@ -30,6 +30,7 @@ from ...const import (
     BLE_DISCONNECT_TIMEOUT,
     BLE_CONNECTION_TIMEOUT,
     BLE_WRITE_PROCESSING_DELAY,
+    BLE_DISCOVERY_TIMEOUT,
     MODBUS_RESPONSE_TIMEOUT,
     MAX_CONSECUTIVE_TIMEOUTS,
 )
@@ -73,11 +74,12 @@ class BLETransport(ITransport):
         >>> await transport.disconnect()
     """
 
-    def __init__(self, hass):
+    def __init__(self, hass, timing_collector=None):
         """Initialize BLE transport.
 
         Args:
             hass: Home Assistant instance (for bluetooth component access)
+            timing_collector: Optional TimingCollector for Phase 2 measurement
         """
         self._hass = hass
         self._address: Optional[str] = None
@@ -87,6 +89,24 @@ class BLETransport(ITransport):
 
         # Circuit breaker state
         self._consecutive_timeouts = 0
+
+        # Adaptive timing (Phase 2: Measurement Infrastructure)
+        self._timing_collector = timing_collector
+
+        # Adaptive timing (Phase 5: Runtime Application)
+        self._learned_timeouts: dict[str, float] = {}
+
+    def set_learned_timeouts(self, timeouts: dict[str, float]) -> None:
+        """Set learned timeout values (Phase 5: Runtime Application).
+
+        Args:
+            timeouts: Dict mapping operation -> timeout (seconds)
+        """
+        self._learned_timeouts = timeouts
+        _LOGGER.info(
+            "Applied learned timeouts: %s",
+            {op: f"{val:.2f}s" for op, val in timeouts.items()},
+        )
 
     async def connect(
         self, address: str, disconnected_callback: Optional[Callable] = None
@@ -135,7 +155,10 @@ class BLETransport(ITransport):
                 "BLE device %s not yet discovered, waiting for scanner (typical on HA restart)...",
                 address,
             )
-            discovery_timeout = 7.0  # seconds
+            # PHASE 1: Conservative timeout for slow hardware (was 7.0s)
+            # Raspberry Pi 3B+ can take longer for BLE discovery on startup
+            # Now properly configured in const.py for centralized timing management
+            discovery_timeout = BLE_DISCOVERY_TIMEOUT
             discovery_start = time.time()
 
             while (
@@ -312,6 +335,16 @@ class BLETransport(ITransport):
             >>> response = await transport.send(command, timeout=MODBUS_RESPONSE_TIMEOUT)
             >>> assert len(response) > 0
         """
+        # Phase 5: Apply learned timeout if available
+        if self._learned_timeouts and "ble_send" in self._learned_timeouts:
+            learned_timeout = self._learned_timeouts["ble_send"]
+            _LOGGER.debug(
+                "Using learned timeout: %.2fs (default: %.2fs)",
+                learned_timeout,
+                timeout,
+            )
+            timeout = learned_timeout
+
         # Fail-fast connection check: Detect connection loss immediately
         # This prevents operations from hanging when BLE connection is lost
         if not self.is_connected:
@@ -345,6 +378,10 @@ class BLETransport(ITransport):
             _LOGGER.debug(
                 "Sending %d bytes to %s: %s", len(data), self._address, data.hex()
             )
+
+        # Phase 2: Start timing measurement
+        timing_start = time.time()
+        operation_success = False
 
         try:
             # Step 1: Write command WITH response (wait for ACK)
@@ -426,8 +463,19 @@ class BLETransport(ITransport):
 
             # Success! Reset circuit breaker
             self._consecutive_timeouts = 0
+            operation_success = True
 
             _LOGGER.debug("=== BLE WRITE-READ-NOTIFY OPERATION SUCCESS ===")
+
+            # Phase 2: Record successful timing
+            if self._timing_collector:
+                duration_ms = (time.time() - timing_start) * 1000
+                self._timing_collector.record(
+                    operation='ble_modbus_send',
+                    duration_ms=duration_ms,
+                    success=True,
+                    metadata={'timeout': timeout}
+                )
 
             return response
 
@@ -441,12 +489,34 @@ class BLETransport(ITransport):
                 timeout,
             )
             _LOGGER.debug("=== BLE WRITE-READ-NOTIFY OPERATION TIMEOUT ===")
+
+            # Phase 2: Record timeout (failure)
+            if self._timing_collector:
+                duration_ms = (time.time() - timing_start) * 1000
+                self._timing_collector.record(
+                    operation='ble_modbus_send',
+                    duration_ms=duration_ms,
+                    success=False,
+                    metadata={'timeout': timeout, 'error': 'timeout'}
+                )
+
             raise
 
         except DeviceRejectedCommandError:
             # Device rejected command (expected protocol error) - log without stack trace
             # Note: Already logged at DEBUG level when detected (line 319)
             _LOGGER.debug("=== BLE WRITE-READ-NOTIFY OPERATION REJECTED ===")
+
+            # Phase 2: Record rejection (protocol error, not timing issue)
+            if self._timing_collector:
+                duration_ms = (time.time() - timing_start) * 1000
+                self._timing_collector.record(
+                    operation='ble_modbus_send',
+                    duration_ms=duration_ms,
+                    success=False,
+                    metadata={'timeout': timeout, 'error': 'rejected'}
+                )
+
             raise
 
         except BleakError as err:
@@ -455,6 +525,17 @@ class BLETransport(ITransport):
             # RuntimeError → UseCase handles → UpdateFailed → ConfigEntryNotReady
             _LOGGER.warning("BLE connection error during send: %s", err)
             _LOGGER.debug("=== BLE WRITE-READ-NOTIFY OPERATION CONNECTION ERROR ===")
+
+            # Phase 2: Record connection error
+            if self._timing_collector:
+                duration_ms = (time.time() - timing_start) * 1000
+                self._timing_collector.record(
+                    operation='ble_modbus_send',
+                    duration_ms=duration_ms,
+                    success=False,
+                    metadata={'timeout': timeout, 'error': 'ble_connection'}
+                )
+
             # Force disconnect to ensure clean state
             await self.disconnect()
             raise RuntimeError(f"BLE connection lost during send: {err}") from err
@@ -462,6 +543,17 @@ class BLETransport(ITransport):
         except Exception as err:
             _LOGGER.error("BLE operation failed with exception: %s", err, exc_info=True)
             _LOGGER.debug("=== BLE WRITE-READ-NOTIFY OPERATION FAILED ===")
+
+            # Phase 2: Record unexpected error
+            if self._timing_collector:
+                duration_ms = (time.time() - timing_start) * 1000
+                self._timing_collector.record(
+                    operation='ble_modbus_send',
+                    duration_ms=duration_ms,
+                    success=False,
+                    metadata={'timeout': timeout, 'error': 'unexpected'}
+                )
+
             raise
 
     @property
