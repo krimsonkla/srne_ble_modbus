@@ -94,7 +94,29 @@ class ConnectionManager(IConnectionManager):
             This is called from Bleak's event loop and must not be async.
             We schedule the async handler using create_task.
         """
-        _LOGGER.warning("BLE disconnect callback triggered for %s", self._address)
+        # Extract diagnostic information from client
+        client_address = getattr(client, "address", "unknown")
+        is_connected = getattr(client, "is_connected", None)
+
+        # Try to get RSSI if available (platform-dependent)
+        rssi = None
+        try:
+            # RSSI may be available on some platforms via internal backend
+            if hasattr(client, "_backend"):
+                rssi = getattr(client._backend, "rssi", None)
+        except Exception:
+            pass  # RSSI not available on this platform
+
+        _LOGGER.warning(
+            "BLE disconnect callback triggered - Address: %s, Client connected state: %s, RSSI: %s, "
+            "Current failures: %d, Current state: %s",
+            client_address,
+            is_connected,
+            f"{rssi}dBm" if rssi is not None else "unavailable",
+            self._consecutive_failures,
+            self._state_machine.state.name if self._state_machine else "unknown",
+        )
+
         # Schedule async handler - can't await in callback
         asyncio.create_task(self.handle_connection_lost())
 
