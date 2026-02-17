@@ -334,6 +334,12 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 disabled_addresses = (
                     self._disabled_entity_service.get_disabled_addresses()
                 )
+                if disabled_addresses:
+                    _LOGGER.info(
+                        "Excluding %d disabled register addresses: %s",
+                        len(disabled_addresses),
+                        [f"0x{addr:04X}" for addr in sorted(disabled_addresses)[:10]]
+                    )
 
             # Combine failed and disabled registers for exclusion
             excluded_registers = failed_registers | disabled_addresses
