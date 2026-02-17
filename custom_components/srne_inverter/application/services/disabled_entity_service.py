@@ -203,21 +203,25 @@ class DisabledEntityService(IDisabledEntityService):
     def _map_entity_to_address(self, entity_id: str) -> int | None:
         """Map entity ID to register address.
 
-        Extracts entity name from ID and looks up corresponding register.
+        Extracts entity name from ID by removing the entry_id prefix,
+        then looks up corresponding register.
 
         Args:
-            entity_id: Full entity ID (e.g., "sensor.srne_inverter_battery_voltage")
+            entity_id: Full entity ID (e.g., "sensor.e60000231107692658_battery_voltage")
 
         Returns:
             Register address or None if not found
 
         Example:
-            >>> address = service._map_entity_to_address("sensor.srne_inverter_battery_voltage")
+            >>> # Entity ID format: {domain}.{entry_id}_{register_name}
+            >>> address = service._map_entity_to_address("sensor.e60000231107692658_battery_voltage")
+            >>> # Extracts "battery_voltage" and looks it up in register definitions
             >>> assert address == 0x0100
         """
         try:
             # Extract entity name from entity_id
-            # Format: "sensor.srne_inverter_battery_voltage" → "battery_voltage"
+            # Format: "sensor.{entry_id}_{entity_name}" → "{entity_name}"
+            # Example: "sensor.e60000231107692658_battery_voltage" → "battery_voltage"
             parts = entity_id.split(".")
             if len(parts) != 2:
                 _LOGGER.debug("Invalid entity_id format (expected domain.entity_id): %s", entity_id)
@@ -226,7 +230,14 @@ class DisabledEntityService(IDisabledEntityService):
             entity_name = parts[1]
             _LOGGER.debug("Mapping entity_id %s → extracted name: %s", entity_id, entity_name)
 
-            # Remove common prefixes
+            # Remove entry_id prefix (entities are prefixed with config entry ID)
+            # Format: "{entry_id}_{actual_name}" → "{actual_name}"
+            entry_id_prefix = f"{self._config_entry.entry_id}_"
+            if entity_name.startswith(entry_id_prefix):
+                entity_name = entity_name[len(entry_id_prefix):]
+                _LOGGER.debug("Removed entry_id prefix: %s", entity_name)
+
+            # Remove legacy prefixes (for backward compatibility with older entity IDs)
             original_name = entity_name
             for prefix in ["srne_inverter_", "srne_"]:
                 if entity_name.startswith(prefix):
