@@ -57,6 +57,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         batch_builder: Any = None,
         register_mapper: Any = None,
         transaction_manager: Any = None,
+        disabled_entity_service: Any = None,
         timing_collector: Any = None,
         timeout_learner: Any = None,
     ) -> None:
@@ -73,6 +74,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             batch_builder: Optional BatchBuilderService
             register_mapper: Optional RegisterMapperService
             transaction_manager: Optional TransactionManagerService
+            disabled_entity_service: Optional IDisabledEntityService
             timing_collector: Optional TimingCollector for Phase 2 measurement
             timeout_learner: Optional TimeoutLearner for Phase 3 learning
         """
@@ -101,6 +103,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._batch_builder = batch_builder
         self._register_mapper = register_mapper
         self._transaction_manager = transaction_manager
+        self._disabled_entity_service = disabled_entity_service
         self._timing_collector = timing_collector
         self._timeout_learner = timeout_learner
 
@@ -284,7 +287,10 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         _LOGGER.info(
                             "Loaded %d learned timeout(s) from storage: %s",
                             len(self._learned_timeouts),
-                            {op: f"{val:.2f}s" for op, val in self._learned_timeouts.items()},
+                            {
+                                op: f"{val:.2f}s"
+                                for op, val in self._learned_timeouts.items()
+                            },
                         )
                         # Apply learned timeouts to transport (Phase 5: Runtime Application)
                         self._apply_learned_timeouts(self._learned_timeouts)
@@ -310,10 +316,27 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._rebuild_batches()
         self._log_dependency_diagnostics()
 
+        # Subscribe to disabled entity service for dynamic updates
+        if self._disabled_entity_service:
+            self._disabled_entity_service.subscribe_to_updates(
+                self._handle_disabled_entity_change
+            )
+            _LOGGER.debug("Subscribed to disabled entity updates")
+
     def _rebuild_batches(self) -> None:
-        """Rebuild register batches using BatchBuilderService."""
+        """Rebuild register batches using BatchBuilderService and DisabledEntityService."""
         try:
             failed_registers = self._transaction_manager.get_failed_registers()
+
+            # Get disabled register addresses from injected service
+            disabled_addresses = set()
+            if self._disabled_entity_service:
+                disabled_addresses = (
+                    self._disabled_entity_service.get_disabled_addresses()
+                )
+
+            # Combine failed and disabled registers for exclusion
+            excluded_registers = failed_registers | disabled_addresses
 
             # Pass config entry options to batch builder so it can filter
             # registers based on disabled entity types (numbers/selects)
@@ -321,22 +344,43 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             self._register_batches = self._batch_builder.build_batches(
                 device_config=self._device_config,
-                failed_registers=failed_registers,
+                failed_registers=excluded_registers,  # Pass combined exclusion set
                 options=options,
             )
 
             self._transaction_manager.acknowledge_batch_rebuild()
 
             _LOGGER.info(
-                "Built %d register batches for device %s (excluding %d failed registers)",
+                "Built %d register batches for device %s (excluding %d failed + %d disabled registers)",
                 len(self._register_batches),
                 self._address,
                 len(failed_registers),
+                len(disabled_addresses),
             )
 
         except Exception as err:
             _LOGGER.error("Error rebuilding batches: %s", err)
             # Keep existing batches on error
+
+    def _handle_disabled_entity_change(self) -> None:
+        """Handle disabled entity state changes.
+
+        Called by DisabledEntityService when entities are enabled/disabled.
+        Rebuilds batches and triggers data refresh.
+        """
+        try:
+            _LOGGER.info("Disabled entity state changed, rebuilding batches")
+
+            # Rebuild batches to reflect new state
+            self._rebuild_batches()
+
+            # Trigger immediate update to refresh data
+            # This ensures newly enabled entities get their first value immediately
+            # Use create_task to avoid blocking the callback
+            self.hass.async_create_task(self.async_request_refresh())
+
+        except Exception as err:
+            _LOGGER.error("Error handling disabled entity change: %s", err)
 
     def _build_dependency_map(self) -> None:
         """Build reverse dependency map for tracking calculated sensor dependencies."""
@@ -663,6 +707,10 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_shutdown(self) -> None:
         """Shutdown coordinator and clean up resources."""
         _LOGGER.debug("Shutting down coordinator")
+
+        # Shutdown disabled entity service
+        if self._disabled_entity_service:
+            self._disabled_entity_service.shutdown()
 
         # Transport cleanup via injected dependency
         try:

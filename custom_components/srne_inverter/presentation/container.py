@@ -77,6 +77,7 @@ class DIContainer:
     register_mapper_service: Optional[Any] = None
     transaction_manager_service: Optional[Any] = None
     dependency_resolver_service: Optional[Any] = None
+    disabled_entity_service: Optional[Any] = None  # IDisabledEntityService
 
     # Presentation Layer
     coordinator: Optional[Any] = None
@@ -164,6 +165,13 @@ def create_container(
         transaction_manager=container.transaction_manager_service,
     )
 
+    # Disabled entity optimization service
+    container.disabled_entity_service = _create_disabled_entity_service(
+        hass=hass,
+        entry=entry,
+        device_config=config,
+    )
+
     # Presentation Layer
     # Wire coordinator with all services
     container.coordinator = _create_coordinator(
@@ -177,6 +185,7 @@ def create_container(
         batch_builder=container.batch_builder_service,
         register_mapper=container.register_mapper_service,
         transaction_manager=container.transaction_manager_service,
+        disabled_entity_service=container.disabled_entity_service,
         timing_collector=container.timing_collector,
         timeout_learner=container.timeout_learner,
     )
@@ -293,6 +302,34 @@ def _create_register_mapper_service() -> Any:
     return RegisterMapperService()
 
 
+def _create_disabled_entity_service(
+    hass: Any,
+    entry: Any,
+    device_config: dict,
+) -> Any:
+    """Create disabled entity service.
+
+    Args:
+        hass: Home Assistant instance
+        entry: Config entry
+        device_config: Device configuration with register definitions
+
+    Returns:
+        DisabledEntityService for tracking disabled entities
+
+    Real implementation wired
+    """
+    from ..application.services.disabled_entity_service import DisabledEntityService
+
+    register_definitions = device_config.get("registers", {})
+
+    return DisabledEntityService(
+        hass=hass,
+        config_entry=entry,
+        register_definitions=register_definitions,
+    )
+
+
 def _create_transaction_manager_service(failed_register_repo: Any) -> Any:
     """Create transaction manager service.
 
@@ -385,6 +422,7 @@ def _create_coordinator(
     batch_builder: Any,
     register_mapper: Any,
     transaction_manager: Any,
+    disabled_entity_service: Any,
     timing_collector: Any = None,
     timeout_learner: Any = None,
 ) -> Any:
@@ -401,6 +439,7 @@ def _create_coordinator(
         batch_builder: Batch builder service
         register_mapper: Register mapper service
         transaction_manager: Transaction manager service
+        disabled_entity_service: Disabled entity tracking service
         timing_collector: Optional TimingCollector for Phase 2 measurement
         timeout_learner: Optional TimeoutLearner for Phase 3 learning
 
@@ -422,6 +461,7 @@ def _create_coordinator(
         batch_builder=batch_builder,
         register_mapper=register_mapper,
         transaction_manager=transaction_manager,
+        disabled_entity_service=disabled_entity_service,
         timing_collector=timing_collector,
         timeout_learner=timeout_learner,
     )

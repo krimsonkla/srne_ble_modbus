@@ -16,6 +16,7 @@ from .i_failed_register_repository import IFailedRegisterRepository
 from .register_info_protocol import RegisterInfoProtocol
 from .register_batch_protocol import RegisterBatchProtocol
 from .i_batch_strategy import IBatchStrategy
+from .i_disabled_entity_service import IDisabledEntityService
 
 __all__ = [
     "ICRC",
@@ -27,4 +28,5 @@ __all__ = [
     "RegisterInfoProtocol",
     "RegisterBatchProtocol",
     "IBatchStrategy",
+    "IDisabledEntityService",
 ]
