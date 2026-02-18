@@ -207,6 +207,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Perform first refresh
     # Exception handling pattern: ConfigEntryNotReady triggers HA's built-in retry
     # This allows Home Assistant to automatically retry connection on startup failures
+    # Note: HA will automatically retry with exponential backoff
     try:
         await coordinator.async_config_entry_first_refresh()
     except Exception as err:

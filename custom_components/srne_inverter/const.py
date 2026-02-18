@@ -41,7 +41,7 @@ BLE_NOTIFY_SUBSCRIBE_TIMEOUT = 1.0  # Timeout for notification subscription
 BLE_CONNECTION_TIMEOUT = 5.0  # Overall connection operation timeout
 BLE_DISCONNECT_TIMEOUT = 0.5  # Timeout for disconnect operations
 BLE_NOTIFY_RETRY_DELAY = 0.25  # Delay between notification subscription retries
-BLE_DISCOVERY_TIMEOUT = 15.0  # Wait time for device discovery on HA restart
+BLE_DISCOVERY_TIMEOUT = 20.0  # Wait time for device discovery on HA restart
 
 # Modbus Protocol Timing
 MODBUS_RESPONSE_TIMEOUT = 1.5  # Wait for Modbus response from device

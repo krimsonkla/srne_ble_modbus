@@ -139,6 +139,18 @@ class BLETransport(ITransport):
         _LOGGER.debug("Closing stale connections for %s", address)
         await close_stale_connections_by_address(address)
 
+        # Check if BLE adapter is ready (has active scanners)
+        # This prevents unclear errors when adapter is still initializing on HA restart
+        scanner_count = bluetooth.async_scanner_count(self._hass, connectable=True)
+        if scanner_count == 0:
+            _LOGGER.error(
+                "No active BLE scanners found - Bluetooth adapter may still be initializing. "
+                "This is common on first HA startup. HA will automatically retry connection."
+            )
+            return False
+
+        _LOGGER.debug("BLE adapter ready with %d active scanner(s)", scanner_count)
+
         # Callback to get latest BLE device info
         def _get_ble_device():
             return bluetooth.async_ble_device_from_address(
@@ -168,9 +180,13 @@ class BLETransport(ITransport):
 
             if not ble_device:
                 _LOGGER.error(
-                    "BLE device not found after %.1fs discovery wait: %s",
-                    discovery_timeout,
+                    "BLE device %s not found after %.1fs discovery wait. "
+                    "Possible causes: (1) Bluetooth adapter still initializing (common on first HA restart), "
+                    "(2) Device out of range, (3) Device name/address mismatch. "
+                    "HA will automatically retry. Troubleshooting: (1) Wait and let HA retry, "
+                    "(2) Move device closer to adapter, (3) Check Bluetooth integration logs for adapter status.",
                     address,
+                    discovery_timeout,
                 )
                 return False
 
@@ -184,13 +200,14 @@ class BLETransport(ITransport):
             # Wrap connection with safety timeout (Home Assistant best practice)
             async with asyncio_timeout(BLEAK_SAFETY_TIMEOUT):
                 # Use establish_connection for automatic retry logic
+                # Increased from 2 to 5 attempts for cold start scenarios (HA restart with BLE adapter initialization)
                 self._client = await establish_connection(
                     BleakClient,
                     ble_device,
                     address,
                     disconnected_callback=disconnected_callback,
                     ble_device_callback=_get_ble_device,
-                    max_attempts=2,
+                    max_attempts=5,
                 )
 
             if not self._client.is_connected:
@@ -211,8 +228,10 @@ class BLETransport(ITransport):
                 except (asyncio.TimeoutError, BleakError) as err:
                     if attempt == max_notify_attempts - 1:
                         _LOGGER.error(
-                            "Timeout subscribing to NOTIFY_UUID after %d attempts",
+                            "Timeout subscribing to NOTIFY_UUID after %d attempts: %s",
                             max_notify_attempts,
+                            err,
+                            exc_info=True,
                         )
                         await self.disconnect()
                         return False
@@ -230,7 +249,7 @@ class BLETransport(ITransport):
             return True
 
         except (BleakError, asyncio.TimeoutError) as err:
-            _LOGGER.error("Failed to establish connection: %s", err)
+            _LOGGER.error("Failed to establish connection: %s", err, exc_info=True)
             if self._client:
                 try:
                     await self._client.disconnect()
@@ -380,7 +399,6 @@ class BLETransport(ITransport):
 
         # Phase 2: Start timing measurement
         timing_start = time.time()
-        operation_success = False
 
         try:
             # Step 1: Write command WITH response (wait for ACK)
@@ -451,7 +469,6 @@ class BLETransport(ITransport):
 
             # Success! Reset circuit breaker
             self._consecutive_timeouts = 0
-            operation_success = True
 
             _LOGGER.debug("=== BLE WRITE-READ-NOTIFY OPERATION SUCCESS ===")
 
@@ -459,10 +476,10 @@ class BLETransport(ITransport):
             if self._timing_collector:
                 duration_ms = (time.time() - timing_start) * 1000
                 self._timing_collector.record(
-                    operation='ble_send',
+                    operation="ble_send",
                     duration_ms=duration_ms,
                     success=True,
-                    metadata={'timeout': timeout}
+                    metadata={"timeout": timeout},
                 )
 
             return response
@@ -482,10 +499,10 @@ class BLETransport(ITransport):
             if self._timing_collector:
                 duration_ms = (time.time() - timing_start) * 1000
                 self._timing_collector.record(
-                    operation='ble_send',
+                    operation="ble_send",
                     duration_ms=duration_ms,
                     success=False,
-                    metadata={'timeout': timeout, 'error': 'timeout'}
+                    metadata={"timeout": timeout, "error": "timeout"},
                 )
 
             raise
@@ -499,10 +516,10 @@ class BLETransport(ITransport):
             if self._timing_collector:
                 duration_ms = (time.time() - timing_start) * 1000
                 self._timing_collector.record(
-                    operation='ble_send',
+                    operation="ble_send",
                     duration_ms=duration_ms,
                     success=False,
-                    metadata={'timeout': timeout, 'error': 'rejected'}
+                    metadata={"timeout": timeout, "error": "rejected"},
                 )
 
             raise
@@ -518,10 +535,10 @@ class BLETransport(ITransport):
             if self._timing_collector:
                 duration_ms = (time.time() - timing_start) * 1000
                 self._timing_collector.record(
-                    operation='ble_send',
+                    operation="ble_send",
                     duration_ms=duration_ms,
                     success=False,
-                    metadata={'timeout': timeout, 'error': 'ble_connection'}
+                    metadata={"timeout": timeout, "error": "ble_connection"},
                 )
 
             # Force disconnect to ensure clean state
@@ -536,10 +553,10 @@ class BLETransport(ITransport):
             if self._timing_collector:
                 duration_ms = (time.time() - timing_start) * 1000
                 self._timing_collector.record(
-                    operation='ble_send',
+                    operation="ble_send",
                     duration_ms=duration_ms,
                     success=False,
-                    metadata={'timeout': timeout, 'error': 'unexpected'}
+                    metadata={"timeout": timeout, "error": "unexpected"},
                 )
 
             raise

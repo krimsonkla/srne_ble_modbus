@@ -3,7 +3,7 @@
   "name": "SRNE BLE Modbus",
   "codeowners": [],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["bluetooth_adapters"],
   "documentation": "https://github.com/krimsonkla/srne_ble_modbus",
   "homeassistant": "2024.12.0",
   "icon": "mdi:power-settings",
