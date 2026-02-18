@@ -142,14 +142,14 @@ class BLETransport(ITransport):
         # Check if BLE adapter is ready (has active scanners)
         # This prevents unclear errors when adapter is still initializing on HA restart
         scanner_count = bluetooth.async_scanner_count(self._hass, connectable=True)
+        _LOGGER.info("BLE adapter status: %d active scanner(s) found", scanner_count)
+
         if scanner_count == 0:
             _LOGGER.error(
                 "No active BLE scanners found - Bluetooth adapter may still be initializing. "
                 "This is common on first HA startup. HA will automatically retry connection."
             )
             return False
-
-        _LOGGER.debug("BLE adapter ready with %d active scanner(s)", scanner_count)
 
         # Callback to get latest BLE device info
         def _get_ble_device():

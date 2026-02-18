@@ -64,8 +64,14 @@ class DisabledEntityService(IDisabledEntityService):
             len(self._register_definitions) if self._register_definitions else 0
         )
         if self._entity_to_register_map:
-            sample_entities = list(self._entity_to_register_map.items())[:5]
-            _LOGGER.debug("Sample entity→register mappings: %s", sample_entities)
+            # Show sample entity_ids to help debug mapping issues
+            sample_entity_ids = list(self._entity_to_register_map.keys())[:10]
+            _LOGGER.info("Sample entity_ids in map: %s", sample_entity_ids)
+
+            # Show sample register names
+            sample_with_registers = {k: v for k, v in list(self._entity_to_register_map.items())[:5] if v is not None}
+            if sample_with_registers:
+                _LOGGER.debug("Sample entity→register mappings: %s", sample_with_registers)
 
     def get_disabled_addresses(self) -> Set[int]:
         """Get set of register addresses for currently disabled entities.
@@ -236,11 +242,16 @@ class DisabledEntityService(IDisabledEntityService):
                 if entity_id:
                     entity_register_map[entity_id] = register_name
 
-        _LOGGER.debug(
+        _LOGGER.info(
             "Built entity→register map with %d entities (%d with registers)",
             len(entity_register_map),
             sum(1 for v in entity_register_map.values() if v is not None)
         )
+
+        # Debug: Show sample mappings
+        sample_with_registers = {k: v for k, v in list(entity_register_map.items())[:5] if v is not None}
+        if sample_with_registers:
+            _LOGGER.debug("Sample entity→register mappings: %s", sample_with_registers)
 
         return entity_register_map
 
@@ -285,15 +296,24 @@ class DisabledEntityService(IDisabledEntityService):
                 entity_name = full_entity_name
 
             # Step 1: Look up register name from entity configuration
+            _LOGGER.debug(
+                "Looking up entity_name '%s' in entity_to_register_map (map has %d entries)",
+                entity_name,
+                len(self._entity_to_register_map)
+            )
+
             register_name = self._entity_to_register_map.get(entity_name)
             if register_name is None:
+                # Debug: Show similar entity names to help diagnose mismatch
+                similar_keys = [k for k in self._entity_to_register_map.keys() if entity_name in k or k in entity_name]
                 _LOGGER.debug(
-                    "Entity '%s' not found in entity configurations or has no register (calculated entity?)",
-                    entity_name
+                    "Entity '%s' not found in entity configurations. Similar keys: %s",
+                    entity_name,
+                    similar_keys[:5] if similar_keys else "none"
                 )
                 return None
 
-            _LOGGER.debug("Entity '%s' references register '%s'", entity_name, register_name)
+            _LOGGER.debug("Entity '%s' → register '%s'", entity_name, register_name)
 
             # Step 2: Look up address from register definition
             register_def = self._register_definitions.get(register_name)
