@@ -114,7 +114,7 @@ class DisabledEntityService(IDisabledEntityService):
             }
 
             if not disabled_entity_ids:
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "No disabled entities found for this config entry. "
                     "If you disabled entities, they may not be detected yet."
                 )
@@ -134,30 +134,26 @@ class DisabledEntityService(IDisabledEntityService):
                 address = self._map_entity_to_address(entity_id)
                 if address is not None:
                     disabled_addresses.add(address)
-                    _LOGGER.debug(
-                        "Mapped disabled entity %s → register 0x%04X",
-                        entity_id,
-                        address,
-                    )
                 else:
                     failed_mappings.append(entity_id)
 
-            if failed_mappings:
-                _LOGGER.warning(
-                    "Could not map %d disabled entities to registers: %s",
-                    len(failed_mappings),
-                    failed_mappings[:5]  # Show first 5 failures
-                )
-
             if disabled_addresses:
                 _LOGGER.info(
-                    "Excluding %d registers from polling: %s",
+                    "✅ Successfully mapped %d/%d disabled entities to register addresses: %s",
                     len(disabled_addresses),
+                    len(disabled_entity_ids),
                     [f"0x{addr:04X}" for addr in sorted(disabled_addresses)[:10]]
                 )
+
+                if failed_mappings:
+                    _LOGGER.info(
+                        "ℹ️  %d disabled entities have no registers (calculated/coordinator_data entities): %s",
+                        len(failed_mappings),
+                        [e.split(".")[-1] for e in failed_mappings[:5]]  # Show entity names only
+                    )
             else:
-                _LOGGER.warning(
-                    "Found %d disabled entities but none mapped to register addresses",
+                _LOGGER.info(
+                    "ℹ️  Found %d disabled entities but none have register addresses (all are calculated/coordinator_data entities)",
                     len(disabled_entity_ids)
                 )
 
@@ -263,9 +259,10 @@ class DisabledEntityService(IDisabledEntityService):
     def _map_entity_to_address(self, entity_id: str) -> int | None:
         """Map entity ID to register address.
 
-        Uses two-step mapping:
-        1. entity_id → register name (via entity configuration)
-        2. register name → address (via register definition)
+        Uses suffix matching instead of prefix parsing:
+        1. Check which entity in our map matches the suffix of the registry entity_id
+        2. Look up register name from that entity
+        3. Look up address from register definition
 
         Args:
             entity_id: Full entity ID (e.g., "sensor.e60000231107692658_battery_voltage")
@@ -275,63 +272,66 @@ class DisabledEntityService(IDisabledEntityService):
 
         Example:
             >>> # Entity ID: sensor.e60000231107692658_derate_power
-            >>> # Step 1: "derate_power" → register name "derate_power"
-            >>> # Step 2: register "derate_power" → address 57880
+            >>> # Step 1: Find entity ending with "_derate_power" → "derate_power"
+            >>> # Step 2: "derate_power" → register name "derate_power"
+            >>> # Step 3: register "derate_power" → address 57880
             >>> address = service._map_entity_to_address("sensor.e60000231107692658_derate_power")
             >>> assert address == 57880
         """
         try:
-            # Extract entity name from entity_id
-            # Format: "{domain}.{entry_id}_{entity_name}" → "{entity_name}"
+            # Extract everything after the domain
+            # Format: "{domain}.{something}" → "{something}"
             parts = entity_id.split(".")
             if len(parts) != 2:
                 _LOGGER.debug("Invalid entity_id format (expected domain.entity_id): %s", entity_id)
                 return None
 
-            full_entity_name = parts[1]
+            full_entity_name = parts[1]  # e.g., "e60000231107692658_pv2_voltage"
 
-            # Remove entry_id prefix
-            # Format: "{entry_id}_{entity_name}" → "{entity_name}"
-            entry_id_prefix = f"{self._config_entry.entry_id}_"
-            if full_entity_name.startswith(entry_id_prefix):
-                entity_name = full_entity_name[len(entry_id_prefix):]
-                _LOGGER.info("🔧 Extracted: '%s' → '%s'", entity_id, entity_name)
-            else:
-                _LOGGER.info("⚠️  No entry_id prefix in: %s", full_entity_name)
+            # Find which entity in our map matches by checking suffix
+            # We try: exact match first, then suffix match (_{entity_name})
+            entity_name = None
+
+            # Try exact match first
+            if full_entity_name in self._entity_to_register_map:
                 entity_name = full_entity_name
+                _LOGGER.debug("Exact match: '%s'", entity_name)
+            else:
+                # Try suffix matching: check if registry ID ends with "_{entity_from_map}"
+                for map_entity_name in self._entity_to_register_map.keys():
+                    if full_entity_name.endswith(f"_{map_entity_name}"):
+                        entity_name = map_entity_name
+                        _LOGGER.debug("Suffix match: '%s' → '%s'", full_entity_name, entity_name)
+                        break
 
-            # Step 1: Look up register name from entity configuration
-            _LOGGER.info(
-                "🔍 Looking up entity_name '%s' in map with %d entries",
-                entity_name,
-                len(self._entity_to_register_map)
-            )
-
-            register_name = self._entity_to_register_map.get(entity_name)
-            if register_name is None:
-                # Debug: Show similar entity names to help diagnose mismatch
-                similar_keys = [k for k in self._entity_to_register_map.keys() if entity_name in k or k in entity_name]
-                _LOGGER.info(
-                    "❌ Entity '%s' NOT FOUND in map. Similar keys: %s",
-                    entity_name,
-                    similar_keys[:5] if similar_keys else "none"
+            if entity_name is None:
+                _LOGGER.debug(
+                    "No match for '%s'. Available entities: %s",
+                    full_entity_name,
+                    list(self._entity_to_register_map.keys())[:10]
                 )
                 return None
 
-            _LOGGER.info("✅ Mapped entity '%s' → register '%s'", entity_name, register_name)
+            # Step 1: Look up register name from entity configuration
+            register_name = self._entity_to_register_map.get(entity_name)
+            if register_name is None:
+                _LOGGER.debug("Entity '%s' has no register (calculated entity)", entity_name)
+                return None
+
+            _LOGGER.debug("Mapped entity '%s' → register '%s'", entity_name, register_name)
 
             # Step 2: Look up address from register definition
             register_def = self._register_definitions.get(register_name)
             if register_def and "address" in register_def:
                 address = register_def["address"]
-                _LOGGER.info(
-                    "✅ FULL MAPPING: entity '%s' → register '%s' → address 0x%04X (%d)",
-                    entity_name, register_name, address, address
+                _LOGGER.debug(
+                    "Mapped: entity '%s' → register '%s' → address 0x%04X",
+                    entity_name, register_name, address
                 )
                 return address
             else:
-                _LOGGER.info(
-                    "❌ Register '%s' not found in definitions (entity: %s)",
+                _LOGGER.debug(
+                    "Register '%s' not found in definitions (entity: %s)",
                     register_name, entity_name
                 )
                 return None
