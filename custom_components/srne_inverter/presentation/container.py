@@ -312,7 +312,7 @@ def _create_disabled_entity_service(
     Args:
         hass: Home Assistant instance
         entry: Config entry
-        device_config: Device configuration with register definitions
+        device_config: Full device configuration with entities and registers
 
     Returns:
         DisabledEntityService for tracking disabled entities
@@ -321,12 +321,11 @@ def _create_disabled_entity_service(
     """
     from ..application.services.disabled_entity_service import DisabledEntityService
 
-    register_definitions = device_config.get("registers", {})
-
+    # Pass full device_config so service can map entity_id → register → address
     return DisabledEntityService(
         hass=hass,
         config_entry=entry,
-        register_definitions=register_definitions,
+        device_config=device_config,
     )
 
 

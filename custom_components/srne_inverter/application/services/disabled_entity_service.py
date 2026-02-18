@@ -36,18 +36,22 @@ class DisabledEntityService(IDisabledEntityService):
         self,
         hass: HomeAssistant,
         config_entry: ConfigEntry,
-        register_definitions: Dict[str, Any],
+        device_config: Dict[str, Any],
     ) -> None:
         """Initialize disabled entity service.
 
         Args:
             hass: Home Assistant instance
             config_entry: Config entry for this integration
-            register_definitions: Register definitions from device config
+            device_config: Full device configuration (entities + registers)
         """
         self._hass = hass
         self._config_entry = config_entry
-        self._register_definitions = register_definitions
+        self._device_config = device_config
+        self._register_definitions = device_config.get("registers", {})
+
+        # Build entity_id → register name mapping from entity configurations
+        self._entity_to_register_map = self._build_entity_register_map()
 
         # Event subscription
         self._event_unsub = None
@@ -55,12 +59,13 @@ class DisabledEntityService(IDisabledEntityService):
 
         # Diagnostic logging
         _LOGGER.info(
-            "DisabledEntityService initialized with %d register definitions",
-            len(register_definitions) if register_definitions else 0
+            "DisabledEntityService initialized with %d entities and %d register definitions",
+            len(self._entity_to_register_map),
+            len(self._register_definitions) if self._register_definitions else 0
         )
-        if register_definitions:
-            sample_registers = list(register_definitions.keys())[:5]
-            _LOGGER.debug("Sample register names: %s", sample_registers)
+        if self._entity_to_register_map:
+            sample_entities = list(self._entity_to_register_map.items())[:5]
+            _LOGGER.debug("Sample entity→register mappings: %s", sample_entities)
 
     def get_disabled_addresses(self) -> Set[int]:
         """Get set of register addresses for currently disabled entities.
@@ -200,11 +205,51 @@ class DisabledEntityService(IDisabledEntityService):
 
         self._change_callbacks.clear()
 
+    def _build_entity_register_map(self) -> Dict[str, str]:
+        """Build mapping from entity_id to register name.
+
+        Scans entity configurations (sensors, numbers, switches, selects, binary_sensors)
+        to build a lookup table mapping entity_id → register name.
+
+        Returns:
+            Dictionary mapping entity_id to register name
+
+        Example:
+            >>> {
+            ...     "battery_voltage": "battery_voltage",
+            ...     "derate_power": "derate_power",
+            ...     "battery_cycle_count": None  # Calculated, no register
+            ... }
+        """
+        entity_register_map = {}
+
+        # Scan all entity types for register references
+        for entity_type in ["sensors", "numbers", "switches", "selects", "binary_sensors"]:
+            entities = self._device_config.get(entity_type, [])
+            if not isinstance(entities, list):
+                continue
+
+            for entity_config in entities:
+                entity_id = entity_config.get("entity_id")
+                register_name = entity_config.get("register")  # May be None for calculated entities
+
+                if entity_id:
+                    entity_register_map[entity_id] = register_name
+
+        _LOGGER.debug(
+            "Built entity→register map with %d entities (%d with registers)",
+            len(entity_register_map),
+            sum(1 for v in entity_register_map.values() if v is not None)
+        )
+
+        return entity_register_map
+
     def _map_entity_to_address(self, entity_id: str) -> int | None:
         """Map entity ID to register address.
 
-        Extracts entity name from ID by removing the entry_id prefix,
-        then looks up corresponding register.
+        Uses two-step mapping:
+        1. entity_id → register name (via entity configuration)
+        2. register name → address (via register definition)
 
         Args:
             entity_id: Full entity ID (e.g., "sensor.e60000231107692658_battery_voltage")
@@ -213,50 +258,56 @@ class DisabledEntityService(IDisabledEntityService):
             Register address or None if not found
 
         Example:
-            >>> # Entity ID format: {domain}.{entry_id}_{register_name}
-            >>> address = service._map_entity_to_address("sensor.e60000231107692658_battery_voltage")
-            >>> # Extracts "battery_voltage" and looks it up in register definitions
-            >>> assert address == 0x0100
+            >>> # Entity ID: sensor.e60000231107692658_derate_power
+            >>> # Step 1: "derate_power" → register name "derate_power"
+            >>> # Step 2: register "derate_power" → address 57880
+            >>> address = service._map_entity_to_address("sensor.e60000231107692658_derate_power")
+            >>> assert address == 57880
         """
         try:
             # Extract entity name from entity_id
-            # Format: "sensor.{entry_id}_{entity_name}" → "{entity_name}"
-            # Example: "sensor.e60000231107692658_battery_voltage" → "battery_voltage"
+            # Format: "{domain}.{entry_id}_{entity_name}" → "{entity_name}"
             parts = entity_id.split(".")
             if len(parts) != 2:
                 _LOGGER.debug("Invalid entity_id format (expected domain.entity_id): %s", entity_id)
                 return None
 
-            entity_name = parts[1]
-            _LOGGER.debug("Mapping entity_id %s → extracted name: %s", entity_id, entity_name)
+            full_entity_name = parts[1]
 
-            # Remove entry_id prefix (entities are prefixed with config entry ID)
-            # Format: "{entry_id}_{actual_name}" → "{actual_name}"
+            # Remove entry_id prefix
+            # Format: "{entry_id}_{entity_name}" → "{entity_name}"
             entry_id_prefix = f"{self._config_entry.entry_id}_"
-            if entity_name.startswith(entry_id_prefix):
-                entity_name = entity_name[len(entry_id_prefix):]
-                _LOGGER.debug("Removed entry_id prefix: %s", entity_name)
+            if full_entity_name.startswith(entry_id_prefix):
+                entity_name = full_entity_name[len(entry_id_prefix):]
+                _LOGGER.debug("Extracted entity name: %s → %s", full_entity_name, entity_name)
+            else:
+                _LOGGER.debug("Entity ID doesn't start with entry_id prefix: %s", full_entity_name)
+                entity_name = full_entity_name
 
-            # Remove legacy prefixes (for backward compatibility with older entity IDs)
-            original_name = entity_name
-            for prefix in ["srne_inverter_", "srne_"]:
-                if entity_name.startswith(prefix):
-                    entity_name = entity_name[len(prefix) :]
-                    _LOGGER.debug("Removed prefix '%s': %s → %s", prefix, original_name, entity_name)
-                    break
+            # Step 1: Look up register name from entity configuration
+            register_name = self._entity_to_register_map.get(entity_name)
+            if register_name is None:
+                _LOGGER.debug(
+                    "Entity '%s' not found in entity configurations or has no register (calculated entity?)",
+                    entity_name
+                )
+                return None
 
-            # Look up register in definitions
-            _LOGGER.debug("Looking up register name '%s' in %d definitions", entity_name, len(self._register_definitions))
-            register_def = self._register_definitions.get(entity_name)
+            _LOGGER.debug("Entity '%s' references register '%s'", entity_name, register_name)
+
+            # Step 2: Look up address from register definition
+            register_def = self._register_definitions.get(register_name)
             if register_def and "address" in register_def:
                 address = register_def["address"]
-                _LOGGER.debug("Found register '%s' → address 0x%04X (%d)", entity_name, address, address)
+                _LOGGER.debug(
+                    "Mapped: entity '%s' → register '%s' → address 0x%04X (%d)",
+                    entity_name, register_name, address, address
+                )
                 return address
             else:
                 _LOGGER.debug(
-                    "Register '%s' not found in definitions (available: %s)",
-                    entity_name,
-                    list(self._register_definitions.keys())[:10] if self._register_definitions else []
+                    "Register '%s' not found in definitions (entity: %s)",
+                    register_name, entity_name
                 )
                 return None
 
