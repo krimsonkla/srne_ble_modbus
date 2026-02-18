@@ -63,15 +63,20 @@ class DisabledEntityService(IDisabledEntityService):
             len(self._entity_to_register_map),
             len(self._register_definitions) if self._register_definitions else 0
         )
+
+        # Show sample register definitions to verify they're loaded
+        if self._register_definitions:
+            sample_register_names = list(self._register_definitions.keys())[:10]
+            _LOGGER.info("📚 Sample register names in definitions: %s", sample_register_names)
         if self._entity_to_register_map:
             # Show sample entity_ids to help debug mapping issues
             sample_entity_ids = list(self._entity_to_register_map.keys())[:10]
             _LOGGER.info("Sample entity_ids in map: %s", sample_entity_ids)
 
-            # Show sample register names
-            sample_with_registers = {k: v for k, v in list(self._entity_to_register_map.items())[:5] if v is not None}
+            # Show sample register names (entities WITH registers)
+            sample_with_registers = {k: v for k, v in list(self._entity_to_register_map.items())[:10] if v is not None}
             if sample_with_registers:
-                _LOGGER.debug("Sample entity→register mappings: %s", sample_with_registers)
+                _LOGGER.info("📋 Sample entity→register mappings: %s", sample_with_registers)
 
     def get_disabled_addresses(self) -> Set[int]:
         """Get set of register addresses for currently disabled entities.
@@ -290,14 +295,14 @@ class DisabledEntityService(IDisabledEntityService):
             entry_id_prefix = f"{self._config_entry.entry_id}_"
             if full_entity_name.startswith(entry_id_prefix):
                 entity_name = full_entity_name[len(entry_id_prefix):]
-                _LOGGER.debug("Extracted entity name: %s → %s", full_entity_name, entity_name)
+                _LOGGER.info("🔧 Extracted: '%s' → '%s'", entity_id, entity_name)
             else:
-                _LOGGER.debug("Entity ID doesn't start with entry_id prefix: %s", full_entity_name)
+                _LOGGER.info("⚠️  No entry_id prefix in: %s", full_entity_name)
                 entity_name = full_entity_name
 
             # Step 1: Look up register name from entity configuration
-            _LOGGER.debug(
-                "Looking up entity_name '%s' in entity_to_register_map (map has %d entries)",
+            _LOGGER.info(
+                "🔍 Looking up entity_name '%s' in map with %d entries",
                 entity_name,
                 len(self._entity_to_register_map)
             )
@@ -306,27 +311,27 @@ class DisabledEntityService(IDisabledEntityService):
             if register_name is None:
                 # Debug: Show similar entity names to help diagnose mismatch
                 similar_keys = [k for k in self._entity_to_register_map.keys() if entity_name in k or k in entity_name]
-                _LOGGER.debug(
-                    "Entity '%s' not found in entity configurations. Similar keys: %s",
+                _LOGGER.info(
+                    "❌ Entity '%s' NOT FOUND in map. Similar keys: %s",
                     entity_name,
                     similar_keys[:5] if similar_keys else "none"
                 )
                 return None
 
-            _LOGGER.debug("Entity '%s' → register '%s'", entity_name, register_name)
+            _LOGGER.info("✅ Mapped entity '%s' → register '%s'", entity_name, register_name)
 
             # Step 2: Look up address from register definition
             register_def = self._register_definitions.get(register_name)
             if register_def and "address" in register_def:
                 address = register_def["address"]
-                _LOGGER.debug(
-                    "Mapped: entity '%s' → register '%s' → address 0x%04X (%d)",
+                _LOGGER.info(
+                    "✅ FULL MAPPING: entity '%s' → register '%s' → address 0x%04X (%d)",
                     entity_name, register_name, address, address
                 )
                 return address
             else:
-                _LOGGER.debug(
-                    "Register '%s' not found in definitions (entity: %s)",
+                _LOGGER.info(
+                    "❌ Register '%s' not found in definitions (entity: %s)",
                     register_name, entity_name
                 )
                 return None
