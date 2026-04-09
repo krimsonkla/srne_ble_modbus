@@ -15,9 +15,15 @@ from ...domain.interfaces import IProtocol, ICRC
 from ...const import (
     FUNC_READ_HOLDING,
     FUNC_WRITE_SINGLE,
+    FUNC_WRITE_MULTIPLE,
     DEFAULT_SLAVE_ID,
     format_modbus_error,
 )
+
+# BLE notify payloads may include a zero prefix (spec: 8 bytes) and/or trailing bytes.
+# Modbus RTU CRC is computed only over the ADU; trim/skip so we do not misread CRC.
+_MAX_BLE_ZERO_PREFIX = 24
+_MAX_READ_RESPONSE_DATA_BYTES = 252  # 126 registers × 2, within spec
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,9 +37,10 @@ class ModbusRTUProtocol(IProtocol):
     - CRC validation
     - Error response detection
 
-    BLE Framing:
-        The SRNE device adds an 8-byte header before the Modbus frame:
-        [0x00 * 8][Modbus RTU frame with CRC]
+    Framing:
+        BLE: SRNE prepends up to 8 (sometimes fewer) 0x00 bytes before the ADU;
+        notify payloads may also contain bytes after the CRC. USB serial: plain
+        Modbus RTU only; ``SerialTransport`` strips a leading TX echo when present.
 
     Attributes:
         crc: CRC calculator implementation
@@ -56,6 +63,65 @@ class ModbusRTUProtocol(IProtocol):
         """
         self._crc = crc
         self._slave_id = slave_id
+
+    @staticmethod
+    def _strip_leading_zero_padding(response: bytes) -> bytes:
+        """Remove leading 0x00 bytes up to _MAX_BLE_ZERO_PREFIX.
+
+        SRNE docs describe an 8-byte zero header; some stacks use shorter padding.
+        Valid Modbus RTU responses never use slave ID 0, so leading zeros are never
+        part of the ADU.
+        """
+        i = 0
+        n = len(response)
+        while (
+            i < n
+            and i < _MAX_BLE_ZERO_PREFIX
+            and response[i] == 0
+        ):
+            i += 1
+        return response[i:]
+
+    def _trim_to_modbus_adu(self, frame: bytes) -> bytes:
+        """If the buffer is longer than the ADU, keep only the first ADU.
+
+        BLE notifications sometimes append extra bytes; using the last two bytes
+        of the full buffer as CRC then fails validation.
+        """
+        if len(frame) < 5:
+            return frame
+
+        function_code = frame[1]
+        if function_code & 0x80:
+            expected = 5
+        elif function_code == FUNC_READ_HOLDING:
+            if len(frame) < 3:
+                return frame
+            byte_count = frame[2]
+            if byte_count > _MAX_READ_RESPONSE_DATA_BYTES:
+                return frame
+            expected = 3 + byte_count + 2
+        elif function_code in (FUNC_WRITE_SINGLE, FUNC_WRITE_MULTIPLE):
+            expected = 8
+        else:
+            return frame
+
+        if len(frame) < expected:
+            raise ValueError(
+                f"Incomplete Modbus frame: expected {expected} bytes, got {len(frame)}"
+            )
+
+        if len(frame) > expected:
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug(
+                    "Trimming Modbus notify payload: %d -> %d bytes (dropped %d trailing)",
+                    len(frame),
+                    expected,
+                    len(frame) - expected,
+                )
+            return frame[:expected]
+
+        return frame
 
     def build_read_command(self, start_address: int, count: int) -> bytes:
         """Build Modbus Read Holding Registers (0x03) command.
@@ -190,17 +256,14 @@ class ModbusRTUProtocol(IProtocol):
             _LOGGER.debug("Response too short: %d bytes", len(response))
             raise ValueError(f"Response too short: {len(response)} bytes")
 
-        # Skip 8-byte BLE header if present (all zeros)
-        if len(response) >= 8 and response[:8] == b"\x00" * 8:
-            modbus_frame = response[8:]
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug(
-                    "Removed BLE header, Modbus frame: %s", modbus_frame.hex()
-                )
-        else:
-            modbus_frame = response
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug("No BLE header found, using full response")
+        # Strip BLE zero prefix (see _strip_leading_zero_padding)
+        modbus_frame = self._strip_leading_zero_padding(response)
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "After zero-prefix strip: %d bytes, hex=%s",
+                len(modbus_frame),
+                modbus_frame[:40].hex() if len(modbus_frame) > 40 else modbus_frame.hex(),
+            )
 
         if len(modbus_frame) < 5:  # Min: slave + func + data + CRC
             _LOGGER.debug("Modbus frame too short: %d bytes", len(modbus_frame))
@@ -223,6 +286,8 @@ class ModbusRTUProtocol(IProtocol):
                 "error": "unsupported_register",
                 "details": "Device returned dash pattern - batch contains unsupported register",
             }
+
+        modbus_frame = self._trim_to_modbus_adu(modbus_frame)
 
         # Validate CRC
         received_crc = struct.unpack("<H", modbus_frame[-2:])[0]

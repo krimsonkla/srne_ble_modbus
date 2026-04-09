@@ -228,6 +228,61 @@ class TestDecodeReadResponse:
         assert 0 in result  # First register
         assert result[0] == 300
 
+    def test_decode_read_response_shorter_zero_prefix(self, protocol):
+        """Some stacks send fewer than 8 leading zero bytes before the ADU."""
+        modbus_frame = bytes(
+            [
+                0x01,
+                0x03,
+                0x02,
+                0x01,
+                0x2C,
+            ]
+        )
+        crc = ModbusCRC16()
+        crc_value = crc.calculate(modbus_frame)
+        full_response = bytes([0x00] * 4) + modbus_frame + struct.pack("<H", crc_value)
+
+        result = protocol.decode_response(full_response)
+        assert result[0] == 300
+
+    def test_decode_read_response_trailing_notify_junk(self, protocol):
+        """BLE notify value may include bytes after the Modbus CRC."""
+        modbus_frame = bytes(
+            [
+                0x01,
+                0x03,
+                0x02,
+                0x01,
+                0x2C,
+            ]
+        )
+        crc = ModbusCRC16()
+        crc_value = crc.calculate(modbus_frame)
+        adu = modbus_frame + struct.pack("<H", crc_value)
+        full_response = bytes([0x00] * 8) + adu + b"\xf3\x4e\x12"
+
+        result = protocol.decode_response(full_response)
+        assert result[0] == 300
+
+    def test_decode_incomplete_frame_raises(self, protocol):
+        """Byte count promises more data than present → clear error (not CRC mismatch)."""
+        modbus_frame = bytes(
+            [
+                0x01,
+                0x03,
+                0x04,
+                0x01,
+                0x2C,
+            ]
+        )
+        crc = ModbusCRC16()
+        crc_value = crc.calculate(modbus_frame)
+        full_frame = bytes([0x00] * 8) + modbus_frame + struct.pack("<H", crc_value)
+
+        with pytest.raises(ValueError, match="Incomplete Modbus frame"):
+            protocol.decode_response(full_frame)
+
     def test_decode_read_response_without_ble_header(self, protocol):
         """Verify decoding response without BLE header."""
         modbus_frame = bytes(
