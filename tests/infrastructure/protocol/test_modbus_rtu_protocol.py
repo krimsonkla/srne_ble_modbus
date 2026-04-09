@@ -393,6 +393,43 @@ class TestDecodeResponseValidation:
             protocol.decode_response(full_frame)
 
 
+class TestDecodeWithCommandHint:
+    """Command-aware sync for USB serial buffers with leading noise."""
+
+    def test_read_with_leading_byte_and_command(self, protocol):
+        modbus_frame = bytes([0x01, 0x03, 0x02, 0x01, 0x2C])
+        crc = ModbusCRC16()
+        adu = modbus_frame + struct.pack("<H", crc.calculate(modbus_frame))
+        rx = b"\xfe" + adu
+        cmd = protocol.build_read_command(0x0100, 1)
+        assert protocol.decode_response(rx, command=cmd)[0] == 300
+
+    def test_read_with_leading_byte_without_command_fails(self, protocol):
+        modbus_frame = bytes([0x01, 0x03, 0x02, 0x01, 0x2C])
+        crc = ModbusCRC16()
+        adu = modbus_frame + struct.pack("<H", crc.calculate(modbus_frame))
+        rx = b"\xfe" + adu
+        with pytest.raises(ValueError, match="CRC mismatch"):
+            protocol.decode_response(rx)
+
+    def test_exception_with_offset_and_command(self, protocol):
+        modbus_frame = bytes([0x01, 0x83, 0x02])
+        crc = ModbusCRC16()
+        adu = modbus_frame + struct.pack("<H", crc.calculate(modbus_frame))
+        rx = b"\xaa\xbb" + adu
+        cmd = protocol.build_read_command(0x0200, 4)
+        result = protocol.decode_response(rx, command=cmd)
+        assert result["error"] == 0x02
+
+    def test_write_response_with_noise_and_command(self, protocol):
+        modbus_frame = bytes([0x01, 0x06, 0x01, 0x00, 0x01, 0x2C])
+        crc = ModbusCRC16()
+        adu = modbus_frame + struct.pack("<H", crc.calculate(modbus_frame))
+        rx = b"\x7f" + adu
+        cmd = protocol.build_write_command(0x0100, 300)
+        assert protocol.decode_response(rx, command=cmd)[0x0100] == 300
+
+
 class TestProtocolInterfaceCompliance:
     """Test that ModbusRTUProtocol properly implements IProtocol."""
 

@@ -441,7 +441,7 @@ class RefreshDataUseCase:
             response = await self._transport.send(
                 command, timeout=MODBUS_RESPONSE_TIMEOUT
             )
-            decoded = self._protocol.decode_response(response)
+            decoded = self._protocol.decode_response(response, command=command)
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug("Decoded response: %s", decoded)
 

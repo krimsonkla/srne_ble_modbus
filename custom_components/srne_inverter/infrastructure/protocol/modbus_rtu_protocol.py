@@ -9,7 +9,7 @@ class and maintains identical behavior.
 
 import struct
 import logging
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
 from ...domain.interfaces import IProtocol, ICRC
 from ...const import (
@@ -24,6 +24,8 @@ from ...const import (
 # Modbus RTU CRC is computed only over the ADU; trim/skip so we do not misread CRC.
 _MAX_BLE_ZERO_PREFIX = 24
 _MAX_READ_RESPONSE_DATA_BYTES = 252  # 126 registers × 2, within spec
+# USB/serial RX may include leading noise; scan this many bytes for a valid ADU.
+_MAX_FRAME_SEARCH_WINDOW = 48
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -123,6 +125,120 @@ class ModbusRTUProtocol(IProtocol):
 
         return frame
 
+    def _crc_valid(self, frame: bytes) -> bool:
+        received = struct.unpack("<H", frame[-2:])[0]
+        return received == self._crc.calculate(frame[:-2])
+
+    def _sync_frame_from_command(self, buf: bytes, command: bytes) -> Optional[bytes]:
+        """Locate a valid Modbus ADU in *buf* using the preceding request *command*.
+
+        Serial adapters often leave garbage before the frame or slice the buffer so
+        the third byte is no longer the real ``byte_count``; trusting *buf*[2] then
+        trims too short and the last two bytes look like register data (e.g. 0x2901).
+        """
+        if len(command) < 8 or len(buf) < 5:
+            return None
+
+        slave = command[0]
+        cmd_fc = command[1]
+
+        for off in range(0, min(_MAX_FRAME_SEARCH_WINDOW + 1, len(buf))):
+            if cmd_fc == FUNC_READ_HOLDING:
+                reg_count = struct.unpack(">H", command[4:6])[0]
+                if 1 <= reg_count <= 125:
+                    data_len = 2 * reg_count
+                    length = 5 + data_len
+                    if off + length <= len(buf):
+                        cand = buf[off : off + length]
+                        if (
+                            cand[0] == slave
+                            and cand[1] == FUNC_READ_HOLDING
+                            and cand[2] == data_len
+                            and self._crc_valid(cand)
+                        ):
+                            if _LOGGER.isEnabledFor(logging.DEBUG):
+                                _LOGGER.debug(
+                                    "Synced read response at RX offset %d (command hint)",
+                                    off,
+                                )
+                            return cand
+
+            if cmd_fc == FUNC_WRITE_SINGLE:
+                if off + 8 <= len(buf):
+                    cand = buf[off : off + 8]
+                    if (
+                        cand[0] == slave
+                        and cand[1] == FUNC_WRITE_SINGLE
+                        and self._crc_valid(cand)
+                    ):
+                        if _LOGGER.isEnabledFor(logging.DEBUG):
+                            _LOGGER.debug(
+                                "Synced write response at RX offset %d (command hint)",
+                                off,
+                            )
+                        return cand
+
+            if off + 5 <= len(buf):
+                cand = buf[off : off + 5]
+                if (
+                    cand[0] == slave
+                    and cand[1] == (cmd_fc | 0x80)
+                    and self._crc_valid(cand)
+                ):
+                    if _LOGGER.isEnabledFor(logging.DEBUG):
+                        _LOGGER.debug(
+                            "Synced exception frame at RX offset %d (command hint)",
+                            off,
+                        )
+                    return cand
+
+        return None
+
+    def _raise_if_crc_invalid(self, modbus_frame: bytes) -> None:
+        received_crc = struct.unpack("<H", modbus_frame[-2:])[0]
+        calculated_crc = self._crc.calculate(modbus_frame[:-2])
+        if received_crc != calculated_crc:
+            _LOGGER.warning(
+                "CRC mismatch: received=0x%04X, calculated=0x%04X",
+                received_crc,
+                calculated_crc,
+            )
+            raise ValueError(
+                f"CRC mismatch: received=0x{received_crc:04X}, "
+                f"calculated=0x{calculated_crc:04X}"
+            )
+
+    def _parse_validated_frame(self, modbus_frame: bytes) -> Dict[str, Any]:
+        """Parse slave, function, data after CRC has been validated."""
+        slave_addr = modbus_frame[0]
+        function_code = modbus_frame[1]
+
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "Decoded frame: slave=0x%02X, func=0x%02X",
+                slave_addr,
+                function_code,
+            )
+
+        if function_code & 0x80:
+            error_code = modbus_frame[2]
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug(
+                    "Modbus exception: func=0x%02X, %s",
+                    function_code,
+                    format_modbus_error(error_code, use_srne_codes=True),
+                )
+            return {"error": error_code}
+
+        if function_code == FUNC_READ_HOLDING:
+            return self._decode_read_response(modbus_frame)
+
+        if function_code == FUNC_WRITE_SINGLE:
+            return self._decode_write_response(modbus_frame)
+
+        _LOGGER.warning("Unknown function code: 0x%02X", function_code)
+        raise ValueError(f"Unknown function code: 0x{function_code:02X}")
+
     def build_read_command(self, start_address: int, count: int) -> bytes:
         """Build Modbus Read Holding Registers (0x03) command.
 
@@ -221,7 +337,9 @@ class ModbusRTUProtocol(IProtocol):
 
         return frame
 
-    def decode_response(self, response: bytes) -> Dict[str, Any]:
+    def decode_response(
+        self, response: bytes, *, command: Optional[bytes] = None
+    ) -> Dict[str, Any]:
         """Decode Modbus response into register address-value pairs.
 
         This handles:
@@ -233,6 +351,8 @@ class ModbusRTUProtocol(IProtocol):
 
         Args:
             response: Raw response bytes from transport (may include BLE header)
+            command: Last Modbus request frame (including CRC). Strongly recommended
+                for USB serial: locates the ADU inside noisy or misaligned RX data.
 
         Returns:
             Dictionary mapping register addresses to values
@@ -287,55 +407,16 @@ class ModbusRTUProtocol(IProtocol):
                 "details": "Device returned dash pattern - batch contains unsupported register",
             }
 
+        synced: Optional[bytes] = None
+        if command is not None:
+            synced = self._sync_frame_from_command(modbus_frame, command)
+
+        if synced is not None:
+            return self._parse_validated_frame(synced)
+
         modbus_frame = self._trim_to_modbus_adu(modbus_frame)
-
-        # Validate CRC
-        received_crc = struct.unpack("<H", modbus_frame[-2:])[0]
-        calculated_crc = self._crc.calculate(modbus_frame[:-2])
-
-        if received_crc != calculated_crc:
-            _LOGGER.warning(
-                "CRC mismatch: received=0x%04X, calculated=0x%04X",
-                received_crc,
-                calculated_crc,
-            )
-            raise ValueError(
-                f"CRC mismatch: received=0x{received_crc:04X}, "
-                f"calculated=0x{calculated_crc:04X}"
-            )
-
-        # Parse frame header
-        slave_addr = modbus_frame[0]
-        function_code = modbus_frame[1]
-
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug(
-                "Decoded frame: slave=0x%02X, func=0x%02X",
-                slave_addr,
-                function_code,
-            )
-
-        # Check for error response (function code with 0x80 bit set)
-        if function_code & 0x80:
-            error_code = modbus_frame[2]
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug(
-                    "Modbus exception: func=0x%02X, %s",
-                    function_code,
-                    format_modbus_error(error_code, use_srne_codes=True),
-                )
-            return {"error": error_code}
-
-        # Decode read response
-        if function_code == FUNC_READ_HOLDING:
-            return self._decode_read_response(modbus_frame)
-
-        # Decode write response
-        if function_code == FUNC_WRITE_SINGLE:
-            return self._decode_write_response(modbus_frame)
-
-        _LOGGER.warning("Unknown function code: 0x%02X", function_code)
-        raise ValueError(f"Unknown function code: 0x{function_code:02X}")
+        self._raise_if_crc_invalid(modbus_frame)
+        return self._parse_validated_frame(modbus_frame)
 
     def _decode_read_response(self, frame: bytes) -> Dict[int, int]:
         """Decode read holding registers response.

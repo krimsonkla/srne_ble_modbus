@@ -168,7 +168,7 @@ class TestConcreteImplementations:
             def build_write_command(self, address: int, value: int) -> bytes:
                 return b"\x01\x06"
 
-            def decode_response(self, response: bytes) -> dict:
+            def decode_response(self, response: bytes, *, command=None) -> dict:
                 return {0x0100: 486}
 
         protocol = MockProtocol()

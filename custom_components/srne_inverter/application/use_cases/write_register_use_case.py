@@ -183,7 +183,7 @@ class WriteRegisterUseCase:
             response = await self._transport.send(
                 command, timeout=MODBUS_RESPONSE_TIMEOUT
             )
-            decoded = self._protocol.decode_response(response)
+            decoded = self._protocol.decode_response(response, command=command)
 
             if decoded and "error" not in decoded:
                 _LOGGER.debug("Password authentication successful")
@@ -250,7 +250,7 @@ class WriteRegisterUseCase:
         try:
             # Send write command
             response = await self._transport.send(command, timeout=MODBUS_WRITE_TIMEOUT)
-            decoded = self._protocol.decode_response(response)
+            decoded = self._protocol.decode_response(response, command=command)
 
             if decoded and "error" not in decoded:
                 _LOGGER.info(
