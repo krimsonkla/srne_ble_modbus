@@ -47,6 +47,14 @@ BLE_DISCOVERY_TIMEOUT = 20.0  # Wait time for device discovery on HA restart
 MODBUS_RESPONSE_TIMEOUT = 1.5  # Wait for Modbus response from device
 MODBUS_WRITE_TIMEOUT = 1  # Timeout for write operations
 
+# Write retry policy
+# A user click (e.g., AC Power 0xDF00) that lands in the device's recent-command
+# shadow times out at the transport layer. The transport itself does not retry —
+# the use case retries here so a transient miss looks like a brief pause instead
+# of a visible flap-and-revert in the UI. Idempotent for switch-type registers.
+MAX_WRITE_RETRIES = 3  # Total attempts on a single write (1 initial + 2 retries)
+WRITE_RETRY_DELAY_SEC = 2.0  # Wait between attempts after a timeout
+
 # Command Delays
 COMMAND_DELAY_WRITE = 0.01  # Delay after write operations in preset manager
 WRITE_VERIFY_DELAY_UI = 0.15  # Delay before read-verify in UI number entity
