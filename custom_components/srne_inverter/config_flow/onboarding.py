@@ -403,7 +403,9 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             return None
 
                         # Decode response using protocol
-                        decoded = self._protocol.decode_response(response)
+                        decoded = self._protocol.decode_response(
+                            response, command=request_frame
+                        )
 
                         # Check for error response (dash pattern or Modbus exception)
                         # Both indicate the register/feature is not supported
@@ -467,7 +469,7 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                             # Decode password response
                             password_decoded = self._protocol.decode_response(
-                                password_response
+                                password_response, command=password_frame
                             )
 
                             if "error" in password_decoded:
@@ -492,7 +494,9 @@ class SRNEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             return False
 
                         # Decode response using protocol
-                        decoded = self._protocol.decode_response(response)
+                        decoded = self._protocol.decode_response(
+                            response, command=request_frame
+                        )
 
                         # Check for error response
                         if "error" in decoded:

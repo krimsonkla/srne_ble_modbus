@@ -11,6 +11,7 @@ Application Layer Extraction
 Extracted WriteRegisterResult DTO
 """
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -19,9 +20,11 @@ from ...domain.interfaces import ITransport, IProtocol
 from ...domain.value_objects.exception_code import ExceptionCode
 from ...const import (
     DEFAULT_SLAVE_ID,
+    MAX_WRITE_RETRIES,
     MODBUS_ERROR_CODES,
     MODBUS_RESPONSE_TIMEOUT,
     MODBUS_WRITE_TIMEOUT,
+    WRITE_RETRY_DELAY_SEC,
 )
 from .write_register_result import WriteRegisterResult
 
@@ -183,7 +186,7 @@ class WriteRegisterUseCase:
             response = await self._transport.send(
                 command, timeout=MODBUS_RESPONSE_TIMEOUT
             )
-            decoded = self._protocol.decode_response(response)
+            decoded = self._protocol.decode_response(response, command=command)
 
             if decoded and "error" not in decoded:
                 _LOGGER.debug("Password authentication successful")
@@ -247,32 +250,47 @@ class WriteRegisterUseCase:
             command.hex(),
         )
 
-        try:
-            # Send write command
-            response = await self._transport.send(command, timeout=MODBUS_WRITE_TIMEOUT)
-            decoded = self._protocol.decode_response(response)
+        # Retry on transport timeout. Switch-type registers (e.g. 0xDF00 AC Power)
+        # sometimes land in the device's recent-command shadow and silently drop;
+        # a retry after a short pause typically lands cleanly. Decoded errors
+        # (bad value, read-only, etc.) are NOT retried — the device rejected the
+        # write semantically, retrying changes nothing.
+        last_timeout: Optional[Exception] = None
+        for attempt in range(1, MAX_WRITE_RETRIES + 1):
+            try:
+                response = await self._transport.send(
+                    command, timeout=MODBUS_WRITE_TIMEOUT
+                )
+                decoded = self._protocol.decode_response(response, command=command)
 
-            if decoded and "error" not in decoded:
-                _LOGGER.info(
-                    "Successfully wrote register 0x%04X = %d",
-                    register,
-                    value,
-                )
-                return WriteRegisterResult(
-                    success=True,
-                    register=register,
-                    value=value,
-                )
-            else:
+                if decoded and "error" not in decoded:
+                    if attempt > 1:
+                        _LOGGER.info(
+                            "Wrote register 0x%04X = %d on attempt %d/%d",
+                            register,
+                            value,
+                            attempt,
+                            MAX_WRITE_RETRIES,
+                        )
+                    else:
+                        _LOGGER.info(
+                            "Successfully wrote register 0x%04X = %d",
+                            register,
+                            value,
+                        )
+                    return WriteRegisterResult(
+                        success=True,
+                        register=register,
+                        value=value,
+                    )
+
                 error_code = decoded.get("error") if decoded else None
                 error_msg = self._get_error_message(error_code, register, value)
-
                 _LOGGER.error(
                     "Write to register 0x%04X failed: %s",
                     register,
                     error_msg,
                 )
-
                 return WriteRegisterResult(
                     success=False,
                     error=error_msg,
@@ -281,14 +299,48 @@ class WriteRegisterUseCase:
                     value=value,
                 )
 
-        except Exception as err:
-            _LOGGER.error("Failed to write register 0x%04X: %s", register, err)
-            return WriteRegisterResult(
-                success=False,
-                error=f"Write error: {err}",
-                register=register,
-                value=value,
-            )
+            except asyncio.TimeoutError as err:
+                last_timeout = err
+                if attempt < MAX_WRITE_RETRIES:
+                    _LOGGER.warning(
+                        "Write to register 0x%04X timed out on attempt %d/%d, "
+                        "retrying in %.1fs",
+                        register,
+                        attempt,
+                        MAX_WRITE_RETRIES,
+                        WRITE_RETRY_DELAY_SEC,
+                    )
+                    await asyncio.sleep(WRITE_RETRY_DELAY_SEC)
+                    continue
+                # Final attempt timed out — fall through to the after-loop error.
+                break
+
+            except Exception as err:
+                # Non-timeout exception — connection error, protocol error, etc.
+                # Don't retry, surface immediately.
+                _LOGGER.error("Failed to write register 0x%04X: %s", register, err)
+                return WriteRegisterResult(
+                    success=False,
+                    error=f"Write error: {err}",
+                    register=register,
+                    value=value,
+                )
+
+        _LOGGER.error(
+            "Failed to write register 0x%04X after %d attempts: %s",
+            register,
+            MAX_WRITE_RETRIES,
+            last_timeout,
+        )
+        return WriteRegisterResult(
+            success=False,
+            error=(
+                f"Write timed out after {MAX_WRITE_RETRIES} attempts: "
+                f"{last_timeout}"
+            ),
+            register=register,
+            value=value,
+        )
 
     def _is_protected_register(self, register: int) -> bool:
         """Check if register is in protected range.

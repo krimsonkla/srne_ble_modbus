@@ -4,7 +4,7 @@ Extracted from protocol.py for one-class-per-file compliance.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, Optional
 
 
 class IProtocol(ABC):
@@ -71,7 +71,9 @@ class IProtocol(ABC):
         """
 
     @abstractmethod
-    def decode_response(self, response: bytes) -> Dict[int, int]:
+    def decode_response(
+        self, response: bytes, *, command: Optional[bytes] = None
+    ) -> Dict[int, int]:
         """Decode Modbus response into register address-value pairs.
 
         This method handles:
@@ -82,6 +84,9 @@ class IProtocol(ABC):
 
         Args:
             response: Raw response bytes from transport (includes BLE header)
+            command: Optional request frame (with CRC) sent immediately before this
+                response. When set, the decoder searches the RX buffer for a valid ADU
+                of the expected length (fixes serial noise / misalignment on USB).
 
         Returns:
             Dictionary mapping register addresses to decoded values

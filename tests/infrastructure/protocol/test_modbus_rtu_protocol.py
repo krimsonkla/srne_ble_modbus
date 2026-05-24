@@ -228,6 +228,61 @@ class TestDecodeReadResponse:
         assert 0 in result  # First register
         assert result[0] == 300
 
+    def test_decode_read_response_shorter_zero_prefix(self, protocol):
+        """Some stacks send fewer than 8 leading zero bytes before the ADU."""
+        modbus_frame = bytes(
+            [
+                0x01,
+                0x03,
+                0x02,
+                0x01,
+                0x2C,
+            ]
+        )
+        crc = ModbusCRC16()
+        crc_value = crc.calculate(modbus_frame)
+        full_response = bytes([0x00] * 4) + modbus_frame + struct.pack("<H", crc_value)
+
+        result = protocol.decode_response(full_response)
+        assert result[0] == 300
+
+    def test_decode_read_response_trailing_notify_junk(self, protocol):
+        """BLE notify value may include bytes after the Modbus CRC."""
+        modbus_frame = bytes(
+            [
+                0x01,
+                0x03,
+                0x02,
+                0x01,
+                0x2C,
+            ]
+        )
+        crc = ModbusCRC16()
+        crc_value = crc.calculate(modbus_frame)
+        adu = modbus_frame + struct.pack("<H", crc_value)
+        full_response = bytes([0x00] * 8) + adu + b"\xf3\x4e\x12"
+
+        result = protocol.decode_response(full_response)
+        assert result[0] == 300
+
+    def test_decode_incomplete_frame_raises(self, protocol):
+        """Byte count promises more data than present → clear error (not CRC mismatch)."""
+        modbus_frame = bytes(
+            [
+                0x01,
+                0x03,
+                0x04,
+                0x01,
+                0x2C,
+            ]
+        )
+        crc = ModbusCRC16()
+        crc_value = crc.calculate(modbus_frame)
+        full_frame = bytes([0x00] * 8) + modbus_frame + struct.pack("<H", crc_value)
+
+        with pytest.raises(ValueError, match="Incomplete Modbus frame"):
+            protocol.decode_response(full_frame)
+
     def test_decode_read_response_without_ble_header(self, protocol):
         """Verify decoding response without BLE header."""
         modbus_frame = bytes(
@@ -336,6 +391,43 @@ class TestDecodeResponseValidation:
 
         with pytest.raises(ValueError, match="CRC mismatch"):
             protocol.decode_response(full_frame)
+
+
+class TestDecodeWithCommandHint:
+    """Command-aware sync for USB serial buffers with leading noise."""
+
+    def test_read_with_leading_byte_and_command(self, protocol):
+        modbus_frame = bytes([0x01, 0x03, 0x02, 0x01, 0x2C])
+        crc = ModbusCRC16()
+        adu = modbus_frame + struct.pack("<H", crc.calculate(modbus_frame))
+        rx = b"\xfe" + adu
+        cmd = protocol.build_read_command(0x0100, 1)
+        assert protocol.decode_response(rx, command=cmd)[0] == 300
+
+    def test_read_with_leading_byte_without_command_fails(self, protocol):
+        modbus_frame = bytes([0x01, 0x03, 0x02, 0x01, 0x2C])
+        crc = ModbusCRC16()
+        adu = modbus_frame + struct.pack("<H", crc.calculate(modbus_frame))
+        rx = b"\xfe" + adu
+        with pytest.raises(ValueError, match="CRC mismatch"):
+            protocol.decode_response(rx)
+
+    def test_exception_with_offset_and_command(self, protocol):
+        modbus_frame = bytes([0x01, 0x83, 0x02])
+        crc = ModbusCRC16()
+        adu = modbus_frame + struct.pack("<H", crc.calculate(modbus_frame))
+        rx = b"\xaa\xbb" + adu
+        cmd = protocol.build_read_command(0x0200, 4)
+        result = protocol.decode_response(rx, command=cmd)
+        assert result["error"] == 0x02
+
+    def test_write_response_with_noise_and_command(self, protocol):
+        modbus_frame = bytes([0x01, 0x06, 0x01, 0x00, 0x01, 0x2C])
+        crc = ModbusCRC16()
+        adu = modbus_frame + struct.pack("<H", crc.calculate(modbus_frame))
+        rx = b"\x7f" + adu
+        cmd = protocol.build_write_command(0x0100, 300)
+        assert protocol.decode_response(rx, command=cmd)[0x0100] == 300
 
 
 class TestProtocolInterfaceCompliance:
