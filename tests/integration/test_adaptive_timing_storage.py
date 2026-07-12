@@ -5,13 +5,10 @@ Home Assistant's storage system.
 """
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
-import json
+from unittest.mock import Mock
 from pathlib import Path
 
 from homeassistant.helpers.storage import Store
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ADDRESS
 
 from custom_components.srne_inverter.const import DOMAIN
 
@@ -29,15 +26,9 @@ def mock_hass(tmp_path):
 class TestLearnedTimeoutsPersistence:
     """Test learned timeouts survive HA restart."""
 
-    @pytest.mark.asyncio
-    async def test_learned_timeouts_save_and_load(self, tmp_path):
+    async def test_learned_timeouts_save_and_load(self, hass):
         """Test learned timeouts are saved and loaded correctly."""
         # Create mock hass with temporary storage directory
-        hass = Mock()
-        hass.data = {}  # Required for Store
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         entry_id = "test_entry_123"
 
         # Create store instance
@@ -67,13 +58,8 @@ class TestLearnedTimeoutsPersistence:
         # Verify failed_registers still intact
         assert loaded_data["failed_registers"] == [256, 257]
 
-    @pytest.mark.asyncio
-    async def test_learned_timeouts_empty_initial_state(self, tmp_path):
+    async def test_learned_timeouts_empty_initial_state(self, hass):
         """Test fresh installation has no learned timeouts."""
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         entry_id = "test_entry_new"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
 
@@ -83,13 +69,8 @@ class TestLearnedTimeoutsPersistence:
         # Should return None for new installation
         assert loaded_data is None
 
-    @pytest.mark.asyncio
-    async def test_learned_timeouts_update_existing(self, tmp_path):
+    async def test_learned_timeouts_update_existing(self, hass):
         """Test updating learned timeouts preserves other data."""
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         entry_id = "test_entry_update"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
 
@@ -123,13 +104,8 @@ class TestLearnedTimeoutsPersistence:
 class TestStorageBackwardCompatibility:
     """Test backward compatibility with old storage format."""
 
-    @pytest.mark.asyncio
-    async def test_old_storage_without_learned_timeouts(self, tmp_path):
+    async def test_old_storage_without_learned_timeouts(self, hass):
         """Test old installations work without learned_timeouts key."""
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         entry_id = "test_entry_old"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
 
@@ -150,13 +126,8 @@ class TestStorageBackwardCompatibility:
         learned_timeouts = loaded_data.get("learned_timeouts", {})
         assert learned_timeouts == {}
 
-    @pytest.mark.asyncio
-    async def test_migration_adds_learned_timeouts(self, tmp_path):
+    async def test_migration_adds_learned_timeouts(self, hass):
         """Test migrating old storage to new format."""
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         entry_id = "test_entry_migrate"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
 
@@ -183,13 +154,8 @@ class TestStorageBackwardCompatibility:
 class TestCorruptedStorageFallback:
     """Test fallback to defaults on corrupted storage."""
 
-    @pytest.mark.asyncio
-    async def test_corrupted_json_returns_none(self, tmp_path):
+    async def test_corrupted_json_returns_none(self, hass):
         """Test corrupted JSON file returns None."""
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         entry_id = "test_entry_corrupt"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
 
@@ -205,13 +171,8 @@ class TestCorruptedStorageFallback:
 
         assert loaded_data is None
 
-    @pytest.mark.asyncio
-    async def test_invalid_learned_timeouts_structure(self, tmp_path):
+    async def test_invalid_learned_timeouts_structure(self, hass):
         """Test handling of invalid learned_timeouts structure."""
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         entry_id = "test_entry_invalid"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
 
@@ -233,13 +194,8 @@ class TestCorruptedStorageFallback:
         assert isinstance(learned_timeouts, dict)
         assert len(learned_timeouts) == 0
 
-    @pytest.mark.asyncio
-    async def test_fallback_to_defaults_on_load_error(self, tmp_path):
+    async def test_fallback_to_defaults_on_load_error(self, hass):
         """Test fallback to default timeouts on load error."""
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         entry_id = "test_entry_error"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
 
@@ -257,14 +213,9 @@ class TestCorruptedStorageFallback:
 class TestStoragePerformance:
     """Test storage operations performance."""
 
-    @pytest.mark.asyncio
-    async def test_save_performance(self, tmp_path):
+    async def test_save_performance(self, hass):
         """Test saving learned timeouts is fast."""
         import time
-
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
 
         entry_id = "test_entry_perf"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
@@ -289,14 +240,9 @@ class TestStoragePerformance:
         # Save should be < 100ms
         assert elapsed < 0.1
 
-    @pytest.mark.asyncio
-    async def test_load_performance(self, tmp_path):
+    async def test_load_performance(self, hass):
         """Test loading learned timeouts is fast."""
         import time
-
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
 
         entry_id = "test_entry_load_perf"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
@@ -324,13 +270,8 @@ class TestStoragePerformance:
 class TestStorageDataIntegrity:
     """Test data integrity in storage operations."""
 
-    @pytest.mark.asyncio
-    async def test_learned_timeouts_data_types(self, tmp_path):
+    async def test_learned_timeouts_data_types(self, hass):
         """Test learned timeouts maintain correct data types."""
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         entry_id = "test_entry_types"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
 
@@ -338,7 +279,7 @@ class TestStorageDataIntegrity:
         data = {
             "learned_timeouts": {
                 "modbus_read": 0.875,  # float
-                "ble_command": 1.0,     # float (not int)
+                "ble_command": 1.0,  # float (not int)
             },
         }
         await store.async_save(data)
@@ -349,13 +290,8 @@ class TestStorageDataIntegrity:
         assert isinstance(loaded_data["learned_timeouts"]["modbus_read"], float)
         assert isinstance(loaded_data["learned_timeouts"]["ble_command"], (float, int))
 
-    @pytest.mark.asyncio
-    async def test_learned_timeouts_precision(self, tmp_path):
+    async def test_learned_timeouts_precision(self, hass):
         """Test learned timeouts maintain precision."""
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         entry_id = "test_entry_precision"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
 
@@ -363,7 +299,7 @@ class TestStorageDataIntegrity:
         data = {
             "learned_timeouts": {
                 "modbus_read": 0.8765432,  # High precision
-                "ble_command": 1.234,      # 3 decimal places
+                "ble_command": 1.234,  # 3 decimal places
             },
         }
         await store.async_save(data)
@@ -375,13 +311,8 @@ class TestStorageDataIntegrity:
         assert abs(loaded_data["learned_timeouts"]["modbus_read"] - 0.8765432) < 0.0001
         assert loaded_data["learned_timeouts"]["ble_command"] == 1.234
 
-    @pytest.mark.asyncio
-    async def test_empty_learned_timeouts_dict(self, tmp_path):
+    async def test_empty_learned_timeouts_dict(self, hass):
         """Test saving and loading empty learned_timeouts dict."""
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         entry_id = "test_entry_empty"
         store = Store(hass, 1, f"{DOMAIN}_{entry_id}_failed_registers")
 
@@ -403,13 +334,8 @@ class TestStorageDataIntegrity:
 class TestMultipleEntriesStorage:
     """Test storage isolation between multiple config entries."""
 
-    @pytest.mark.asyncio
-    async def test_multiple_entries_isolated(self, tmp_path):
+    async def test_multiple_entries_isolated(self, hass):
         """Test each config entry has isolated storage."""
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
-
         # Create stores for two different entries
         store1 = Store(hass, 1, f"{DOMAIN}_entry1_failed_registers")
         store2 = Store(hass, 1, f"{DOMAIN}_entry2_failed_registers")

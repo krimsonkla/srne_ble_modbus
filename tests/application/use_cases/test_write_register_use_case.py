@@ -189,7 +189,7 @@ class TestWriteRegisterUseCase:
 
         # Assert
         assert result.success is False
-        assert "error" in result.error.lower()
+        assert "timed out" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_is_protected_register(self, use_case):

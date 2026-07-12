@@ -23,6 +23,9 @@ def mock_entry():
     entry = Mock()
     entry.entry_id = "test_entry_id"
     entry.data = {"address": "AA:BB:CC:DD:EE:FF"}
+    # Coordinator reads entry.options.get("update_interval", 60); must be
+    # a real dict so the default kicks in.
+    entry.options = {}
     return entry
 
 
@@ -195,8 +198,12 @@ class TestContainerLifecycle:
         """Test that multiple containers have isolated dependencies."""
         entry1 = Mock()
         entry1.entry_id = "entry1"
+        entry1.data = {"address": "AA:BB:CC:DD:EE:FF"}
+        entry1.options = {}
         entry2 = Mock()
         entry2.entry_id = "entry2"
+        entry2.data = {"address": "11:22:33:44:55:66"}
+        entry2.options = {}
 
         container1 = create_container(mock_hass, entry1, test_config)
         container2 = create_container(mock_hass, entry2, test_config)

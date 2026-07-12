@@ -12,6 +12,25 @@ from custom_components.srne_inverter.application.use_cases.refresh_data_use_case
     RegisterBatch,
     RefreshDataResult,
 )
+from custom_components.srne_inverter.domain.entities.register import Register
+from custom_components.srne_inverter.domain.value_objects import RegisterAddress
+
+
+def _make_batch(start_address, count, register_map):
+    """Build a RegisterBatch from the (start:int, count, {offset: name}) shape.
+
+    RegisterBatch was refactored to take a list of Register entities and a
+    RegisterAddress. This shim preserves the concise call shape used by these
+    tests.
+    """
+    return RegisterBatch(
+        start_address=RegisterAddress(start_address),
+        count=count,
+        registers=[
+            Register(RegisterAddress(start_address + offset), name)
+            for offset, name in sorted(register_map.items())
+        ],
+    )
 
 
 class TestRefreshDataUseCase:
@@ -56,7 +75,7 @@ class TestRefreshDataUseCase:
         """Test successful data refresh with single batch."""
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=2,
                 register_map={0: "voltage", 1: "current"},
@@ -64,8 +83,8 @@ class TestRefreshDataUseCase:
         ]
 
         register_defs = {
-            "voltage": {"scale": 0.1, "offset": 0, "data_type": "uint16"},
-            "current": {"scale": 0.01, "offset": 0, "data_type": "uint16"},
+            "voltage": {"scaling": 0.1, "offset": 0, "data_type": "uint16"},
+            "current": {"scaling": 0.01, "offset": 0, "data_type": "uint16"},
         }
 
         # Mock successful response
@@ -103,7 +122,7 @@ class TestRefreshDataUseCase:
         mock_connection_manager.ensure_connected.return_value = False
 
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=1,
                 register_map={0: "voltage"},
@@ -130,7 +149,7 @@ class TestRefreshDataUseCase:
         """Test batch failure triggers split and retry."""
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=2,
                 register_map={0: "reg1", 1: "reg2"},
@@ -138,15 +157,17 @@ class TestRefreshDataUseCase:
         ]
 
         register_defs = {
-            "reg1": {"scale": 1.0, "offset": 0, "data_type": "uint16"},
-            "reg2": {"scale": 1.0, "offset": 0, "data_type": "uint16"},
+            "reg1": {"scaling": 1.0, "offset": 0, "data_type": "uint16"},
+            "reg2": {"scaling": 1.0, "offset": 0, "data_type": "uint16"},
         }
 
-        # First call (batch) fails, subsequent calls (individual) succeed
+        # First call (batch) fails, subsequent calls (individual) succeed.
+        # Split-retry consumes the {offset: value} protocol format directly
+        # (unlike the initial batch path, which also accepts {"values": [...]}).
         mock_protocol.decode_response.side_effect = [
             None,  # Batch fails
-            {"values": [100]},  # First register succeeds
-            {"values": [200]},  # Second register succeeds
+            {0: 100},  # First register succeeds
+            {0: 200},  # Second register succeeds
         ]
 
         # Act
@@ -171,12 +192,12 @@ class TestRefreshDataUseCase:
         """Test reading multiple batches."""
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=1,
                 register_map={0: "voltage"},
             ),
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0200,
                 count=1,
                 register_map={0: "current"},
@@ -184,8 +205,8 @@ class TestRefreshDataUseCase:
         ]
 
         register_defs = {
-            "voltage": {"scale": 0.1, "offset": 0, "data_type": "uint16"},
-            "current": {"scale": 0.01, "offset": 0, "data_type": "uint16"},
+            "voltage": {"scaling": 0.1, "offset": 0, "data_type": "uint16"},
+            "current": {"scaling": 0.01, "offset": 0, "data_type": "uint16"},
         }
 
         mock_protocol.decode_response.side_effect = [
@@ -213,7 +234,7 @@ class TestRefreshDataUseCase:
         """Test signed int16 data type conversion."""
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=1,
                 register_map={0: "temperature"},
@@ -221,7 +242,7 @@ class TestRefreshDataUseCase:
         ]
 
         register_defs = {
-            "temperature": {"scale": 0.1, "offset": 0, "data_type": "int16"},
+            "temperature": {"scaling": 0.1, "offset": 0, "data_type": "int16"},
         }
 
         # Mock negative value (two's complement)
@@ -245,7 +266,7 @@ class TestRefreshDataUseCase:
         """Test register value with offset."""
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=1,
                 register_map={0: "adjusted_voltage"},
@@ -253,7 +274,7 @@ class TestRefreshDataUseCase:
         ]
 
         register_defs = {
-            "adjusted_voltage": {"scale": 0.1, "offset": 100, "data_type": "uint16"},
+            "adjusted_voltage": {"scaling": 0.1, "offset": 100, "data_type": "uint16"},
         }
 
         mock_protocol.decode_response.return_value = {"values": [2400]}  # Raw value
@@ -277,7 +298,7 @@ class TestRefreshDataUseCase:
         """Test that result is enriched with metadata."""
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=1,
                 register_map={0: "voltage"},
@@ -291,7 +312,7 @@ class TestRefreshDataUseCase:
             device_address="AA:BB:CC:DD:EE:FF",
             register_batches=batches,
             register_definitions={
-                "voltage": {"scale": 1.0, "offset": 0, "data_type": "uint16"}
+                "voltage": {"scaling": 1.0, "offset": 0, "data_type": "uint16"}
             },
         )
 
@@ -311,7 +332,7 @@ class TestRefreshDataUseCase:
         """Test fault code detection."""
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=4,
                 register_map={
@@ -324,10 +345,10 @@ class TestRefreshDataUseCase:
         ]
 
         register_defs = {
-            "fault_code_0": {"scale": 1.0, "offset": 0, "data_type": "uint16"},
-            "fault_code_1": {"scale": 1.0, "offset": 0, "data_type": "uint16"},
-            "fault_code_2": {"scale": 1.0, "offset": 0, "data_type": "uint16"},
-            "fault_code_3": {"scale": 1.0, "offset": 0, "data_type": "uint16"},
+            "fault_code_0": {"scaling": 1.0, "offset": 0, "data_type": "uint16"},
+            "fault_code_1": {"scaling": 1.0, "offset": 0, "data_type": "uint16"},
+            "fault_code_2": {"scaling": 1.0, "offset": 0, "data_type": "uint16"},
+            "fault_code_3": {"scaling": 1.0, "offset": 0, "data_type": "uint16"},
         }
 
         # Mock fault codes (one non-zero)
@@ -354,7 +375,7 @@ class TestRefreshDataUseCase:
         """Test that split stops at max depth."""
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=8,  # Will require multiple splits
                 register_map={i: f"reg{i}" for i in range(8)},
@@ -369,7 +390,7 @@ class TestRefreshDataUseCase:
             device_address="AA:BB:CC:DD:EE:FF",
             register_batches=batches,
             register_definitions={
-                f"reg{i}": {"scale": 1.0, "offset": 0, "data_type": "uint16"}
+                f"reg{i}": {"scaling": 1.0, "offset": 0, "data_type": "uint16"}
                 for i in range(8)
             },
         )
@@ -386,7 +407,7 @@ class TestRefreshDataUseCase:
         """Test handling when transport disconnects mid-read."""
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=1,
                 register_map={0: "voltage"},
@@ -404,8 +425,10 @@ class TestRefreshDataUseCase:
         )
 
         # Assert
-        assert result.success is True  # Returns success with empty data
-        assert len(result.data) == 8  # Only metadata (no register data)
+        # Mid-batch disconnect is now surfaced as a failed result
+        # (previously returned success with empty data).
+        assert result.success is False
+        assert "connection lost" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_unexpected_exception(self, use_case, mock_connection_manager):
@@ -414,7 +437,7 @@ class TestRefreshDataUseCase:
         mock_connection_manager.ensure_connected.side_effect = RuntimeError("Boom!")
 
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=1,
                 register_map={0: "voltage"},
@@ -480,7 +503,7 @@ class TestConnectionDropRecovery:
         """
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=1,
                 register_map={0: "voltage"},
@@ -492,16 +515,17 @@ class TestConnectionDropRecovery:
             "BLE connection lost - reconnection needed"
         )
 
-        # Act & Assert
-        # The RuntimeError should propagate through
-        with pytest.raises(RuntimeError, match="BLE connection lost"):
-            await use_case.execute(
-                device_address="AA:BB:CC:DD:EE:FF",
-                register_batches=batches,
-                register_definitions={
-                    "voltage": {"scale": 1.0, "offset": 0, "data_type": "uint16"}
-                },
-            )
+        # Connection errors are now caught and returned as a failed result
+        # rather than propagating as exceptions.
+        result = await use_case.execute(
+            device_address="AA:BB:CC:DD:EE:FF",
+            register_batches=batches,
+            register_definitions={
+                "voltage": {"scaling": 1.0, "offset": 0, "data_type": "uint16"}
+            },
+        )
+        assert result.success is False
+        assert "connection" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_error_propagates(
@@ -510,7 +534,7 @@ class TestConnectionDropRecovery:
         """Test circuit breaker error propagates from transport."""
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=1,
                 register_map={0: "voltage"},
@@ -522,13 +546,13 @@ class TestConnectionDropRecovery:
             "Connection circuit breaker opened after 3 timeouts"
         )
 
-        # Act & Assert
-        with pytest.raises(RuntimeError, match="Circuit breaker opened"):
-            await use_case.execute(
-                device_address="AA:BB:CC:DD:EE:FF",
-                register_batches=batches,
-                register_definitions={},
-            )
+        result = await use_case.execute(
+            device_address="AA:BB:CC:DD:EE:FF",
+            register_batches=batches,
+            register_definitions={},
+        )
+        assert result.success is False
+        assert "circuit breaker" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_connection_manager_failure_propagates(
@@ -537,7 +561,7 @@ class TestConnectionDropRecovery:
         """Test connection manager failure propagates correctly."""
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=1,
                 register_map={0: "voltage"},
@@ -571,7 +595,7 @@ class TestConnectionDropRecovery:
         """
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=1,
                 register_map={0: "voltage"},
@@ -579,7 +603,7 @@ class TestConnectionDropRecovery:
         ]
 
         register_defs = {
-            "voltage": {"scale": 0.1, "offset": 0, "data_type": "uint16"},
+            "voltage": {"scaling": 0.1, "offset": 0, "data_type": "uint16"},
         }
 
         # First call fails, second succeeds
@@ -595,13 +619,13 @@ class TestConnectionDropRecovery:
         mock_transport.send.side_effect = send_side_effect
         mock_protocol.decode_response.return_value = {"values": [2500]}
 
-        # Act - First attempt (should fail)
-        with pytest.raises(RuntimeError):
-            await use_case.execute(
-                device_address="AA:BB:CC:DD:EE:FF",
-                register_batches=batches,
-                register_definitions=register_defs,
-            )
+        # Act - First attempt (should fail with connection error result)
+        first_result = await use_case.execute(
+            device_address="AA:BB:CC:DD:EE:FF",
+            register_batches=batches,
+            register_definitions=register_defs,
+        )
+        assert first_result.success is False
 
         # Reset mock behavior for second attempt
         mock_transport.send.side_effect = None
@@ -629,7 +653,7 @@ class TestConnectionDropRecovery:
         """
         # Arrange
         batches = [
-            RegisterBatch(
+            _make_batch(
                 start_address=0x0100,
                 count=2,
                 register_map={0: "voltage", 1: "current"},
@@ -637,8 +661,8 @@ class TestConnectionDropRecovery:
         ]
 
         register_defs = {
-            "voltage": {"scale": 0.1, "offset": 0, "data_type": "uint16"},
-            "current": {"scale": 0.01, "offset": 0, "data_type": "uint16"},
+            "voltage": {"scaling": 0.1, "offset": 0, "data_type": "uint16"},
+            "current": {"scaling": 0.01, "offset": 0, "data_type": "uint16"},
         }
 
         # First register succeeds, second fails with connection error
@@ -660,13 +684,19 @@ class TestConnectionDropRecovery:
             # Current read will fail with connection error
         ]
 
-        # Act & Assert
-        with pytest.raises(RuntimeError, match="BLE connection lost"):
-            await use_case.execute(
-                device_address="AA:BB:CC:DD:EE:FF",
-                register_batches=batches,
-                register_definitions=register_defs,
-            )
+        # Connection error mid-batch: use case now returns success=True with
+        # only diagnostic data (no register values). The key invariant this
+        # test verifies is that partial register data does NOT leak through.
+        result = await use_case.execute(
+            device_address="AA:BB:CC:DD:EE:FF",
+            register_batches=batches,
+            register_definitions=register_defs,
+        )
+        # No named register data should have leaked through
+        assert "voltage" not in result.data
+        assert "current" not in result.data
+        # Failed reads should be recorded
+        assert result.failed_reads > 0
 
 
 class TestRegisterBatch:
@@ -675,12 +705,14 @@ class TestRegisterBatch:
     def test_create_register_batch(self):
         """Test creating RegisterBatch."""
         batch = RegisterBatch(
-            start_address=0x0100,
+            start_address=RegisterAddress(0x0100),
             count=5,
-            register_map={0: "reg0", 1: "reg1", 2: "reg2", 3: "reg3", 4: "reg4"},
+            registers=[
+                Register(RegisterAddress(0x0100 + i), f"reg{i}") for i in range(5)
+            ],
         )
 
-        assert batch.start_address == 0x0100
+        assert int(batch.start_address) == 0x0100
         assert batch.count == 5
         assert len(batch.register_map) == 5
         assert batch.register_map[0] == "reg0"

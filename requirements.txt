@@ -8,16 +8,9 @@
 # ==============================================================================
 # Home Assistant Core (Required for local testing)
 # ==============================================================================
-# Use stable 2024.12.x LTS version (matches manifest.json requirement)
-homeassistant
-
-# ==============================================================================
-# Dependency Fixes for Local Development
-# ==============================================================================
-# Fix aiodns/aiohttp compatibility issue in HA 2024.12.x
-# aiodns 3.2.0 has breaking API changes; 3.1.1 is stable
-# This affects homeassistant_alerts component, not SRNE integration
-aiodns==3.1.1
+# Pin to 2025.1.4 to match pytest-homeassistant-custom-component 0.13.205
+# (both must move together; the plugin pins HA exactly).
+homeassistant==2025.1.4
 
 # ==============================================================================
 # Integration Dependencies (from manifest.json)
