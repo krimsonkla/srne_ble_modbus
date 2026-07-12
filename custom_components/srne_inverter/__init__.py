@@ -16,6 +16,50 @@ from __future__ import annotations
 
 import logging
 
+# ---------------------------------------------------------------------------
+# Diagnostic file capture for [SRNE_TRACE] entries (2026-07-11 investigation).
+# Attaches a FileHandler to the top-level custom_components.srne_ble_modbus
+# logger so every submodule's [SRNE_TRACE] line is captured regardless of
+# HA's system_log config or default log-file state. Filter drops non-SRNE_TRACE
+# noise so the file stays parseable. Rotates via logging.handlers.
+# Remove this block once the connection-flap investigation is complete.
+try:
+    _SRNE_TRACE_PATH = "/config/srne_trace.log"
+    _trace_logger = logging.getLogger("custom_components.srne_ble_modbus")
+    _already_attached = any(
+        getattr(h, "baseFilename", None) == _SRNE_TRACE_PATH
+        for h in _trace_logger.handlers
+    )
+    if not _already_attached:
+        from logging.handlers import RotatingFileHandler
+
+        class _SrneTraceFilter(logging.Filter):
+            def filter(self, record):  # type: ignore[override]
+                msg = record.getMessage()
+                return "[SRNE_TRACE]" in msg
+
+        _trace_handler = RotatingFileHandler(
+            _SRNE_TRACE_PATH, maxBytes=5_000_000, backupCount=3
+        )
+        _trace_handler.setLevel(logging.DEBUG)
+        _trace_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s.%(msecs)03d %(levelname)s %(name)s %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+        _trace_handler.addFilter(_SrneTraceFilter())
+        _trace_logger.addHandler(_trace_handler)
+        # Force the logger to DEBUG so [SRNE_TRACE] lines (emitted at DEBUG)
+        # reach the file handler even if HA's global logger config is at INFO+.
+        if _trace_logger.level == logging.NOTSET or _trace_logger.level > logging.DEBUG:
+            _trace_logger.setLevel(logging.DEBUG)
+except (
+    Exception
+):  # pylint: disable=broad-exception-caught  # pragma: no cover - diagnostic setup must never break integration setup
+    pass
+# ---------------------------------------------------------------------------
+
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
