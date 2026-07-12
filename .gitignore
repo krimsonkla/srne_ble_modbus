@@ -16,3 +16,8 @@ devenv.*
 /.devenv/
 /.claude-flow/
 /.claude/
+.env.devenv
+.codacy.yml
+.cache/dev
+.codacy/
+.claude

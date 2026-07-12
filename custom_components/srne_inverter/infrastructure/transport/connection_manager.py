@@ -116,6 +116,16 @@ class ConnectionManager(IConnectionManager):
             self._consecutive_failures,
             self._state_machine.state.name if self._state_machine else "unknown",
         )
+        # Peer-initiated (or link-layer-initiated) disconnect — bleak invoked
+        # our callback. Distinguishes RF/peer drops from integration-side
+        # disconnect() calls tagged with a reason.
+        _LOGGER.debug(
+            "[SRNE_TRACE] peer_disconnect_callback fired addr=%s rssi=%s failures=%d state=%s",
+            client_address,
+            f"{rssi}dBm" if rssi is not None else "unavailable",
+            self._consecutive_failures,
+            self._state_machine.state.name if self._state_machine else "unknown",
+        )
 
         # Schedule async handler - can't await in callback
         asyncio.create_task(self.handle_connection_lost())
@@ -147,7 +157,17 @@ class ConnectionManager(IConnectionManager):
 
         # Already connected?
         if self._state_machine.is_connected:
+            _LOGGER.debug(
+                "[SRNE_TRACE] ensure_connected reuse addr=%s (already connected)",
+                address,
+            )
             return True
+        _LOGGER.debug(
+            "[SRNE_TRACE] ensure_connected NEW addr=%s state=%s failures=%d",
+            address,
+            self._state_machine.state.name,
+            self._consecutive_failures,
+        )
 
         # Check if we can initiate connection
         if not self._state_machine.can_connect:
