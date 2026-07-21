@@ -1,19 +1,48 @@
 # SRNE BLE Modbus Integration for Home Assistant
 
-> [!WARNING]
-> **Work in Progress:** This integration is currently under active development and has undergone very little testing. Features may be incomplete, unstable, or change significantly without notice. **Use at your own risk.**
-
-[![GitHub Release](https://img.shields.io/github/v/release/krimsonkla/srne_ble_modbus?style=flat-square)](https://github.com/krimsonkla/srne_ble_modbus/releases)
+[![Tests](https://img.shields.io/github/actions/workflow/status/krimsonkla/srne_ble_modbus/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/krimsonkla/srne_ble_modbus/actions/workflows/tests.yml)
 [![License](https://img.shields.io/github/license/krimsonkla/srne_ble_modbus?style=flat-square)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg?style=flat-square)](https://www.python.org/)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.12.0%2B-41BDF5.svg?style=flat-square)](https://www.home-assistant.io/)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg?style=flat-square)](https://github.com/hacs/integration)
 
-Local Bluetooth Low Energy (BLE) integration enabling comprehensive monitoring and control of SRNE HF Series hybrid inverters with Home Assistant. No cloud connection required.
+Local **Bluetooth Low Energy** integration for SRNE HF Series hybrid inverters —
+full monitoring and control from Home Assistant with **no cloud connection, no
+vendor account, and no network dependency**.
+
+The inverter speaks Modbus RTU tunnelled over a BLE GATT characteristic. This
+integration implements that transport from the published protocol spec plus
+hardware verification, exposing ~100 registers as native Home Assistant
+entities.
+
+**Highlights**
+
+- **Local-only** — all communication is point-to-point BLE; nothing leaves your
+  network
+- **Domain-driven architecture** — clean domain / application / infrastructure /
+  presentation layering with a single DI container
+  ([architecture](docs/ARCHITECTURE.md))
+- **Documented BLE transport** — framing, CRC, and register semantics written up
+  in [docs/BLE_PROTOCOL.md](docs/BLE_PROTOCOL.md), backed by the
+  [vendor protocol spec](resources/SRNE_Energy_Storage_Inverter_Protocol_v1.96.md)
+- **Reliability-focused** — ephemeral connections per Home Assistant BLE
+  guidance, batched register reads, adaptive timeouts, and automatic hiding of
+  unsupported registers
+- **27 automation blueprints** covering safety, optimization, and monitoring
+- **Tested in CI** — pytest suite runs on every push and pull request
+
+> [!WARNING]
+> **Work in Progress:** actively developed and validated against a limited set
+> of hardware (see [Supported Hardware](#supported-hardware)). Interfaces may
+> change without notice. **Use at your own risk** — see the disclaimer below.
 
 ## Critical Disclaimer
 
 **USE AT YOUR OWN RISK**
 
-This software interfaces directly with electrical equipment via Bluetooth Low Energy (BLE). Improper configuration or use may result in:
+This software interfaces directly with electrical equipment via Bluetooth Low
+Energy (BLE). Improper configuration or use may result in:
+
 - Equipment damage or destruction
 - Voided warranty
 - Battery damage or thermal runaway
@@ -22,13 +51,15 @@ This software interfaces directly with electrical equipment via Bluetooth Low En
 
 **See [DISCLAIMER.md](DISCLAIMER.md) for complete safety warnings and terms.**
 
-Professional installation is strongly recommended for users unfamiliar with electrical systems or battery management.
+Professional installation is strongly recommended for users unfamiliar with
+electrical systems or battery management.
 
 ---
 
 ## Features
 
 ### Real-Time Monitoring
+
 - **Battery Management**: State of charge (SOC), voltage, current, temperature
 - **Solar Production**: PV voltage, current, and power tracking
 - **Grid Monitoring**: Voltage, frequency, and power consumption
@@ -37,6 +68,7 @@ Professional installation is strongly recommended for users unfamiliar with elec
 - **Performance Metrics**: Efficiency tracking and energy statistics
 
 ### Control Capabilities
+
 - **Energy Priority Modes**: Solar First, Battery First, Utility First
 - **Current Limits**: Configurable battery charge and discharge limits
 - **Output Configuration**: Voltage and frequency adjustment
@@ -44,21 +76,32 @@ Professional installation is strongly recommended for users unfamiliar with elec
 - **Load Management**: AC output control and scheduling
 
 ### Automation Support
+
 27 production-ready automation blueprints:
-- **10 Safety Automations**: Battery protection, thermal management, grid failure handling
-- **10 Optimization Automations**: Peak shaving, solar optimization, time-of-use scheduling
-- **7 Monitoring Automations**: Performance tracking, health monitoring, reporting
+
+- **10 Safety Automations**: Battery protection, thermal management, grid
+  failure handling
+- **10 Optimization Automations**: Peak shaving, solar optimization, time-of-use
+  scheduling
+- **7 Monitoring Automations**: Performance tracking, health monitoring,
+  reporting
 
 ## Supported Hardware
 
 ### SRNE HF Series Inverters
+
 Models being tested:
-- ** [Eco Worthy (Rebranded SRNE) 3000W 24V All In One Inverter](https://cdn.shopifycdn.net/s/files/1/0253/9752/6580/files/24V_3000W_solar_inverter_charger.pdf?v=1673075862) HF4830U60-145
+
+- **
+  [Eco Worthy (Rebranded SRNE) 3000W 24V All In One Inverter](https://cdn.shopifycdn.net/s/files/1/0253/9752/6580/files/24V_3000W_solar_inverter_charger.pdf?v=1673075862)
+  HF4830U60-145
   - With accompanied BLE/Wifi Dongle - WFBLE.DTU.PlugPro
 
-Other HF series models may be compatible. Verify your model supports BLE before installation.
+Other HF series models may be compatible. Verify your model supports BLE before
+installation.
 
 ### Requirements
+
 - **Home Assistant**: Version 2024.12.0 or newer
 - **Bluetooth**: BLE adapter (Bluetooth 4.0+)
 - **Inverter**: SRNE HF series with BLE enabled
@@ -97,7 +140,8 @@ cd /config
 git clone https://github.com/krimsonkla/srne_ble_modbus.git custom_components/srne_inverter
 ```
 
-Or download the latest release and extract to `custom_components/srne_inverter/`.
+Or download the latest release and extract to
+`custom_components/srne_inverter/`.
 
 Restart Home Assistant after installation.
 
@@ -109,7 +153,8 @@ Restart Home Assistant after installation.
 2. Search for "SRNE BLE Modbus" or "SRNE"
 3. Enter configuration details:
    - **Device Name**: Friendly name for your inverter
-   - **BLE MAC Address**: Find using Home Assistant BLE scanner or `hcitool lescan`
+   - **BLE MAC Address**: Find using Home Assistant BLE scanner or
+     `hcitool lescan`
    - **Password**: Default is `0000` (check your inverter manual)
 
 4. **Advanced Options** (optional):
@@ -120,10 +165,12 @@ Restart Home Assistant after installation.
 ### Finding Your BLE MAC Address
 
 **Using Home Assistant:**
+
 - Settings → Devices & Services → Bluetooth
 - Look for devices starting with "E60"
 
 **Using Command Line:**
+
 ```bash
 hcitool lescan
 # Look for device name starting with E60
@@ -131,7 +178,9 @@ hcitool lescan
 
 ### Entity Configuration
 
-The integration automatically discovers and configures entities from `entities_pilot.yaml`. Entities are dynamically created based on:
+The integration automatically discovers and configures entities from
+`entities_pilot.yaml`. Entities are dynamically created based on:
+
 - Inverter model capabilities
 - Available Modbus registers
 - Register read/write permissions
@@ -141,6 +190,7 @@ Unsupported or unavailable entities are automatically hidden to prevent errors.
 ## Automation Blueprints
 
 ### Quick Start Examples
+
 Located in `examples/automations/quick_start/`:
 
 - **Battery Protection**: Low battery alerts and protection
@@ -150,10 +200,13 @@ Located in `examples/automations/quick_start/`:
 - **Load Management**: High load alerts and management
 
 ### Advanced Blueprints
+
 Located in `blueprints/automation/srne_inverter/`:
 
 #### 1. Safety Automations (`1_safety/`)
+
 Critical protection features:
+
 - Battery voltage and SOC protection
 - Progressive battery protection with multi-level alerts
 - Temperature protection and thermal stress monitoring
@@ -164,7 +217,9 @@ Critical protection features:
 - Soft start recovery procedures
 
 #### 2. Optimization Automations (`2_optimization/`)
+
 Cost reduction and efficiency:
+
 - Peak shaving to reduce demand charges
 - Solar production optimization
 - Time-of-use scheduling for grid charging
@@ -176,7 +231,9 @@ Cost reduction and efficiency:
 - Solar midday boost during high production
 
 #### 3. Monitoring Automations (`3_monitoring/`)
+
 Performance and health tracking:
+
 - Daily energy reports with statistics
 - Performance dashboards and visualizations
 - Battery health tracking and trending
@@ -184,7 +241,9 @@ Performance and health tracking:
 - Seasonal parameter adjustment
 - Weather-based priority optimization
 
-See [blueprints/automation/srne_inverter/README.md](blueprints/automation/srne_inverter/README.md) for detailed documentation.
+See
+[blueprints/automation/srne_inverter/README.md](blueprints/automation/srne_inverter/README.md)
+for detailed documentation.
 
 ## Safety Guidelines
 
@@ -223,6 +282,7 @@ See [blueprints/automation/srne_inverter/README.md](blueprints/automation/srne_i
 ### Dangerous Operations
 
 **Never perform these operations without complete understanding:**
+
 - Writing to registers without knowing consequences
 - Setting voltage/current beyond manufacturer specifications
 - Disabling all safety automations simultaneously
@@ -230,32 +290,80 @@ See [blueprints/automation/srne_inverter/README.md](blueprints/automation/srne_i
 - Modifying battery parameters during charging/discharging
 - Bypassing inverter safety features
 
+## Architecture
+
+The integration is layered domain-driven — dependencies point inward, so the
+domain logic is testable without Home Assistant or a BLE adapter present.
+
+```mermaid
+flowchart TB
+    P["<b>Presentation</b><br/>HA entity platforms, config flow, DI container"]
+    A["<b>Application</b><br/>use cases, batching, transactions, timeout learning"]
+    D["<b>Domain</b><br/>registers, batches, transactions — pure logic"]
+    I["<b>Infrastructure</b><br/>BLE transport, Modbus codec, HA adapters"]
+
+    P --> A
+    A --> D
+    I --> D
+    P -.->|"wired via DI container"| I
+
+    classDef pres fill:#8250df22,stroke:#8250df
+    classDef app fill:#1f6feb22,stroke:#1f6feb
+    classDef dom fill:#2da44e22,stroke:#2da44e
+    classDef inf fill:#bf872022,stroke:#bf8720
+    class P pres
+    class A app
+    class D dom
+    class I inf
+```
+
+Connections are **ephemeral by design** — a fresh `BleakClient` per polling
+cycle, per
+[Home Assistant's BLE guidance](https://developers.home-assistant.io/docs/bluetooth/),
+rather than a persistent connection. Register reads are batched to keep the
+per-cycle connection cost low.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full breakdown.
+
 ## Documentation
 
 ### Legal and Safety (READ FIRST)
-- [**DISCLAIMER.md**](DISCLAIMER.md) - **MANDATORY READ** - Complete safety warnings and legal terms
+
+- [**DISCLAIMER.md**](DISCLAIMER.md) - **MANDATORY READ** - Complete safety
+  warnings and legal terms
 - [LICENSE](LICENSE) - MIT License terms and conditions
-- [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines and safety requirements
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines and safety
+  requirements
 - [SECURITY.md](SECURITY.md) - Security policy and responsible disclosure
 
 ### User Guides
-- [Installation Guide](docs/QUICK_START_BLE.md)
-- [Configuration Guide](docs/SRNE_CONFIGURABLE_SETTINGS.md)
-- [Password Authentication](docs/PASSWORD_AUTHENTICATION.md)
-- [Automation Guide](blueprints/automation/srne_inverter/README.md)
+
+- [Quick Start](docs/QUICK_START.md) - Step-by-step setup for the integration
+- [Documentation Index](docs/INDEX.md) - Map of all available documentation
+- [Automation Blueprints](blueprints/automation/srne_inverter/README.md) - 27
+  pre-built automations
+- [Automations Overview](AUTOMATIONS.md) - How the blueprint library is
+  organized
 
 ### Technical Documentation
-- [Architecture Overview](docs/ARCHITECTURE_SUMMARY.md)
-- [BLE Protocol](docs/ble-protocol.md)
-- [Modbus Mapping](docs/modbus-protocol-mapping.md)
-- [Entity Configuration Schema](docs/ENTITY_CONFIGURATION_SCHEMA.md)
-- [Services Reference](docs/services.md)
+
+- [Architecture Overview](docs/ARCHITECTURE.md) - Layering, DI container, data
+  flow
+- [BLE Protocol](docs/BLE_PROTOCOL.md) - Transport framing, CRC, register
+  semantics
+- [Test Suite](tests/README.md) - Test layout and how to run it
+
+### Reference Material
+
+- [SRNE Protocol Specification v1.96](resources/SRNE_Energy_Storage_Inverter_Protocol_v1.96.md) -
+  Vendor Modbus register reference
+- [SRNE HF Series User Manual](resources/SRNE_HF_Series_User_Manual.md) -
+  Hardware documentation
 
 ### Troubleshooting
-- [Troubleshooting Guide](docs/QUICK-FIX-GUIDE.md)
-- [BLE Connection Issues](docs/BLE_FIX_QUICK_REFERENCE.md)
-- [Unsupported Features](docs/UNSUPPORTED_FEATURES_ANALYSIS.md)
-- [Auto-Hide Unsupported Entities](docs/AUTO_HIDE_UNSUPPORTED.md)
+
+- [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - BLE connection, register,
+  and entity issues
 
 ## Troubleshooting
 
@@ -264,6 +372,7 @@ See [blueprints/automation/srne_inverter/README.md](blueprints/automation/srne_i
 **Problem**: Integration cannot find or connect to inverter
 
 **Solutions**:
+
 1. Verify inverter BLE is enabled in inverter settings
 2. Check BLE adapter is working:
    ```bash
@@ -279,23 +388,26 @@ See [blueprints/automation/srne_inverter/README.md](blueprints/automation/srne_i
 **Problem**: Some entities appear unavailable after setup
 
 **Causes**:
+
 - Register not supported by your inverter model
 - Permission denied (requires password authentication)
 - Modbus communication error
 - Entity automatically hidden due to read failures
 
 **Solutions**:
+
 1. Check integration logs for specific register errors
 2. Verify password is correctly configured
 3. Confirm register is supported on your model
 4. Review `entities_pilot.yaml` for entity requirements
-5. Check [Unsupported Features Guide](docs/UNSUPPORTED_FEATURES_ANALYSIS.md)
+5. See [Troubleshooting: unsupported registers](docs/TROUBLESHOOTING.md)
 
 ### Write Operations Failing
 
 **Problem**: Cannot change inverter settings
 
 **Solutions**:
+
 1. Verify password authentication is configured correctly
 2. Common passwords: `0000`, `4321`, `1111`, `111111`
 3. Check register is writable on your model
@@ -308,28 +420,33 @@ See [blueprints/automation/srne_inverter/README.md](blueprints/automation/srne_i
 **Problem**: Entity updates are slow or time out
 
 **Solutions**:
+
 1. Increase update interval in integration options
 2. Reduce number of enabled entities
 3. Check BLE signal strength
 4. Verify no BLE interference from other devices
-5. Review [Performance Analysis](docs/PERFORMANCE_ANALYSIS.md)
+5. Review [Troubleshooting: slow updates](docs/TROUBLESHOOTING.md)
 
 ### Incorrect Values Displayed
 
 **Problem**: Sensor values appear incorrect
 
 **Solutions**:
+
 1. Enable debug logging to check raw register values
 2. Verify scaling factors in entity configuration
-3. Check [Scaling Simplification Guide](docs/SCALING_SIMPLIFICATION.md)
+3. Cross-check the register's scale against the
+   [protocol specification](resources/SRNE_Energy_Storage_Inverter_Protocol_v1.96.md)
 4. Compare with inverter display or Android app
-5. Review [Debug Raw Values Guide](docs/DEBUG_RAW_VALUES.md)
+5. See [Troubleshooting: debugging raw values](docs/TROUBLESHOOTING.md)
 
 ## Contributing
 
-Contributions are welcome! **Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [DISCLAIMER.md](DISCLAIMER.md) before submitting pull requests.**
+Contributions are welcome! **Please read [CONTRIBUTING.md](CONTRIBUTING.md) and
+[DISCLAIMER.md](DISCLAIMER.md) before submitting pull requests.**
 
-All contributors must understand the safety implications and follow our safety-first development practices.
+All contributors must understand the safety implications and follow our
+safety-first development practices.
 
 ### Development Setup
 
@@ -338,19 +455,25 @@ All contributors must understand the safety implications and follow our safety-f
 git clone https://github.com/krimsonkla/srne_ble_modbus.git
 cd srne_ble_modbus
 
-# Install development dependencies
-pip install -r requirements_dev.txt
+# Install runtime and test dependencies
+# (install runtime first — the test plugin pins an exact Home Assistant version)
+pip install -r requirements.txt
+pip install -r tests/requirements.txt
 
 # Run tests
-pytest tests/
+pytest
 
 # Run linting
 pylint custom_components/srne_inverter/
 ```
 
+The same steps run in CI on every push and pull request — see
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml).
+
 ### Reporting Issues
 
 When reporting issues, please include:
+
 - Home Assistant version
 - Integration version
 - Inverter model and firmware version
@@ -361,6 +484,7 @@ When reporting issues, please include:
 ### Feature Requests
 
 We welcome feature requests! Please:
+
 - Check existing issues first
 - Provide clear use case description
 - Include example configuration if applicable
@@ -369,25 +493,33 @@ We welcome feature requests! Please:
 ## Support
 
 ### Community Support
-- **GitHub Issues**: [Report bugs and issues](https://github.com/krimsonkla/srne_ble_modbus/issues)
-- **GitHub Discussions**: [Ask questions and share ideas](https://github.com/krimsonkla/srne_ble_modbus/discussions)
+
+- **GitHub Issues**:
+  [Report bugs and issues](https://github.com/krimsonkla/srne_ble_modbus/issues)
+- **GitHub Discussions**:
+  [Ask questions and share ideas](https://github.com/krimsonkla/srne_ble_modbus/discussions)
 - **Documentation**: [Complete documentation](docs/)
 
 ### Professional Support
+
 For commercial installations or professional support:
-- Review [Professional Installation Guide](docs/QUICK_START_BLE.md)
+
+- Review the [Quick Start guide](docs/QUICK_START.md)
 - Consult with licensed electrician
 - Contact qualified Home Assistant integrator
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
+for details.
 
 ## Disclaimer
 
 **This project is not affiliated with, endorsed by, or supported by SRNE.**
 
-THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NONINFRINGEMENT.
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, OR NONINFRINGEMENT.
 
 **YOU ASSUME ALL RISKS AND LIABILITY FOR USING THIS SOFTWARE.**
 
@@ -402,9 +534,11 @@ See [DISCLAIMER.md](DISCLAIMER.md) for complete legal terms and safety warnings.
 
 ## Project Status
 
-**Current Version**: 0.4.0
+**Current Version**: 0.5.0 (see
+[`manifest.json`](custom_components/srne_inverter/manifest.json))
 
 ### Recent Updates
+
 - Added 27 production-ready automation blueprints
 - Implemented automatic entity hiding for unsupported registers
 - Enhanced BLE connection stability and error handling
@@ -413,6 +547,7 @@ See [DISCLAIMER.md](DISCLAIMER.md) for complete legal terms and safety warnings.
 - Expanded monitoring and control capabilities
 
 ### Roadmap
+
 - Expanded inverter model support
 - Enhanced automation templates
 - Advanced diagnostics and troubleshooting tools
@@ -422,6 +557,8 @@ See [DISCLAIMER.md](DISCLAIMER.md) for complete legal terms and safety warnings.
 
 ---
 
-**Remember: This software controls electrical equipment. Always prioritize safety over convenience.**
+**Remember: This software controls electrical equipment. Always prioritize
+safety over convenience.**
 
-For questions about safe operation, electrical safety, battery safety, or system design, consult with qualified professionals before proceeding.
+For questions about safe operation, electrical safety, battery safety, or system
+design, consult with qualified professionals before proceeding.

@@ -5,16 +5,19 @@
 ### Step 1: Import Blueprints (2 minutes)
 
 In Home Assistant:
+
 1. Go to **Settings** → **Automations & Scenes** → **Blueprints**
 2. Click **Import Blueprint**
 3. Import each blueprint URL or upload the YAML files:
 
 **Safety (Required)**:
+
 - `1_safety/progressive_battery_protection.yaml`
 - `1_safety/temperature_protection.yaml`
 - `1_safety/grid_disconnection_handler.yaml`
 
 **Optimization (Recommended)**:
+
 - `2_optimization/smart_night_charging.yaml`
 - `2_optimization/peak_shaving_optimizer.yaml`
 - `2_optimization/solar_midday_boost.yaml`
@@ -22,6 +25,7 @@ In Home Assistant:
 ### Step 2: Create Automations (3 minutes)
 
 For each blueprint:
+
 1. Click **Create Automation**
 2. Select your SRNE Inverter device
 3. Use these quick-start settings:
@@ -31,6 +35,7 @@ For each blueprint:
 ## 🛡️ Safety Automations
 
 ### Progressive Battery Protection
+
 ```yaml
 Name: "Battery Protection - Progressive"
 Device: [Your SRNE Inverter]
@@ -49,6 +54,7 @@ Quick Settings:
 ```
 
 ### Temperature Protection
+
 ```yaml
 Name: "Battery Temperature Guard"
 Device: [Your SRNE Inverter]
@@ -64,6 +70,7 @@ Quick Settings:
 ```
 
 ### Grid Disconnection Handler
+
 ```yaml
 Name: "Grid Failure Protection"
 Device: [Your SRNE Inverter]
@@ -85,6 +92,7 @@ Quick Settings:
 ## ⚡ Optimization Automations
 
 ### Smart Night Charging
+
 ```yaml
 Name: "Off-Peak Charging"
 Device: [Your SRNE Inverter]
@@ -101,6 +109,7 @@ Quick Settings:
 ```
 
 ### Peak Shaving Optimizer
+
 ```yaml
 Name: "Peak Hour Management"
 Device: [Your SRNE Inverter]
@@ -117,6 +126,7 @@ Quick Settings:
 ```
 
 ### Solar Midday Boost
+
 ```yaml
 Name: "Solar Optimization"
 Device: [Your SRNE Inverter]
@@ -137,6 +147,7 @@ Quick Settings:
 ## 🎯 Common Entity Mappings
 
 ### Required Sensors:
+
 ```yaml
 Battery SOC: sensor.srne_battery_soc
 Battery Temp: sensor.srne_battery_temperature
@@ -147,6 +158,7 @@ PV Power: sensor.srne_pv_power
 ```
 
 ### Control Entities:
+
 ```yaml
 Priority Select: select.srne_charge_source_priority
 Max AC Current: number.srne_max_ac_charge_current
@@ -154,6 +166,7 @@ Charging Switch: switch.srne_battery_charging
 ```
 
 ### Optional Entities:
+
 ```yaml
 Grid Frequency: sensor.srne_grid_frequency
 PV Balance: select.srne_pv_power_balance
@@ -231,21 +244,27 @@ Before enabling automations:
 ## 🔧 Troubleshooting Quick Fixes
 
 ### Issue: Automations not triggering
+
 **Fix**: Check entity states in Developer Tools → States
+
 ```yaml
 Look for: "unavailable" or "unknown"
 Fix: Restart SRNE integration or check sensor mapping
 ```
 
 ### Issue: Too many notifications
+
 **Fix**: Adjust notification settings in each automation
+
 ```yaml
 Disable: "Notify on Activation"
 Keep: "Notify on Critical Events"
 ```
 
 ### Issue: Load shedding too aggressive
+
 **Fix**: Adjust SOC thresholds higher
+
 ```yaml
 Change:
   Warning: 30% → 40%
@@ -254,7 +273,9 @@ Change:
 ```
 
 ### Issue: Not charging at night
+
 **Fix**: Check time zone and SOC threshold
+
 ```yaml
 Verify:
   - Time zone: Settings → System → General
@@ -267,16 +288,19 @@ Verify:
 ## 📊 Expected First Week
 
 ### Day 1-2: Learning Phase
+
 - Automations trigger frequently as they learn your patterns
 - Multiple notifications (normal)
 - Minor adjustments needed
 
 ### Day 3-5: Stabilization
+
 - Fewer notifications
 - Smoother operation
 - Pattern established
 
 ### Day 6-7: Optimized
+
 - Minimal intervention
 - Predictable behavior
 - Full automation achieved
@@ -319,7 +343,8 @@ After basic setup works:
 
 ## 💡 Pro Tips
 
-1. **Start with Safety**: Enable all 3 safety automations first, test for 24 hours
+1. **Start with Safety**: Enable all 3 safety automations first, test for 24
+   hours
 2. **Add Optimization Gradually**: Enable one optimization automation per day
 3. **Watch Notifications**: First week will have many - this is normal
 4. **Document Changes**: Keep notes on what thresholds work best
@@ -329,6 +354,7 @@ After basic setup works:
 ---
 
 **Ready to Start?**
+
 1. Import the 6 blueprints
 2. Create automations with quick-start settings above
 3. Enable safety automations first
@@ -341,4 +367,3 @@ After basic setup works:
 ---
 
 **Version**: 1.0
-**Last Updated**: 2026-02-05

@@ -1,10 +1,13 @@
 # Safety Blueprints
 
-This directory contains critical safety automation blueprints that protect your inverter, battery, and connected systems from damage or unsafe conditions.
+This directory contains critical safety automation blueprints that protect your
+inverter, battery, and connected systems from damage or unsafe conditions.
 
 ## Purpose
 
-Safety blueprints monitor critical parameters and take immediate protective actions when dangerous conditions are detected. These automations should be considered **essential** for any SRNE inverter installation.
+Safety blueprints monitor critical parameters and take immediate protective
+actions when dangerous conditions are detected. These automations should be
+considered **essential** for any SRNE inverter installation.
 
 ## Available Blueprints
 
@@ -13,16 +16,19 @@ Safety blueprints monitor critical parameters and take immediate protective acti
 **Purpose:** Comprehensive battery safety monitoring and protection
 
 **What it monitors:**
+
 - Battery State of Charge (SOC)
 - Battery temperature
 - Battery voltage (both over and under voltage)
 
 **When to use:**
+
 - **Always recommended** - This is the most critical safety blueprint
 - Essential for protecting expensive battery investments
 - Required for preventing battery damage from overheating or deep discharge
 
 **Key features:**
+
 - Automatic switching to safe mode when thresholds exceeded
 - Multi-parameter monitoring (temperature, voltage, SOC)
 - Optional automatic charging cutoff on high temperature
@@ -30,6 +36,7 @@ Safety blueprints monitor critical parameters and take immediate protective acti
 - System logging for incident tracking
 
 **Typical configuration:**
+
 - Critical SOC: 10% (prevents deep discharge)
 - Max temperature: 45°C (protects from thermal damage)
 - Safe mode: Switches to "Utility First" to stop battery drain
@@ -41,16 +48,19 @@ Safety blueprints monitor critical parameters and take immediate protective acti
 **Purpose:** Detect grid outages and automatically switch to backup power mode
 
 **What it monitors:**
+
 - Grid voltage levels
 - Grid frequency
 - Grid power availability
 
 **When to use:**
+
 - **Highly recommended** for off-grid or backup power scenarios
 - Critical for areas with unreliable grid power
 - Essential for automatic failover systems
 
 **Key features:**
+
 - Intelligent grid failure detection with configurable thresholds
 - Automatic mode switching during outages
 - Battery preservation during extended outages
@@ -58,6 +68,7 @@ Safety blueprints monitor critical parameters and take immediate protective acti
 - Hysteresis to prevent mode switching on transient events
 
 **Typical configuration:**
+
 - Min grid voltage: 200V
 - Max grid voltage: 260V
 - Detection time: 30 seconds (prevents false triggers)
@@ -69,16 +80,19 @@ Safety blueprints monitor critical parameters and take immediate protective acti
 **Purpose:** Monitor and respond to inverter fault conditions
 
 **What it monitors:**
+
 - Inverter fault codes
 - System error states
 - Component failures
 
 **When to use:**
+
 - **Recommended** for proactive fault management
 - Important for systems requiring high reliability
 - Useful for remote installations where manual intervention is difficult
 
 **Key features:**
+
 - Automatic fault detection and categorization
 - Intelligent response based on fault severity
 - Emergency shutdown capability for critical faults
@@ -86,6 +100,7 @@ Safety blueprints monitor critical parameters and take immediate protective acti
 - Automatic recovery attempts for transient faults
 
 **Typical configuration:**
+
 - Critical faults: Immediate shutdown and notification
 - Warning faults: Notification only
 - Auto-recovery: Enabled for transient issues
@@ -102,19 +117,29 @@ Safety blueprints monitor critical parameters and take immediate protective acti
 
 ### Configuration Tips
 
-1. **Test in safe conditions first** - Verify notifications work before relying on them
-2. **Use redundant notifications** - Configure multiple notification methods for critical alerts
-3. **Set conservative thresholds** - It's better to trigger protection too early than too late
-4. **Monitor the monitors** - Periodically verify your safety automations are active
-5. **Document your settings** - Keep a record of threshold values and why you chose them
+1. **Test in safe conditions first** - Verify notifications work before relying
+   on them
+2. **Use redundant notifications** - Configure multiple notification methods for
+   critical alerts
+3. **Set conservative thresholds** - It's better to trigger protection too early
+   than too late
+4. **Monitor the monitors** - Periodically verify your safety automations are
+   active
+5. **Document your settings** - Keep a record of threshold values and why you
+   chose them
 
 ### Important Warnings
 
-- **Never disable all safety automations** - At minimum, keep battery protection active
-- **Check battery manufacturer specifications** - Use their recommended voltage and temperature ranges
-- **Test grid failure detection** - Verify it works during a controlled test scenario
-- **Battery protection takes precedence** - If multiple automations conflict, battery safety wins
-- **Don't ignore repeated alerts** - Frequent protection triggers indicate a system issue
+- **Never disable all safety automations** - At minimum, keep battery protection
+  active
+- **Check battery manufacturer specifications** - Use their recommended voltage
+  and temperature ranges
+- **Test grid failure detection** - Verify it works during a controlled test
+  scenario
+- **Battery protection takes precedence** - If multiple automations conflict,
+  battery safety wins
+- **Don't ignore repeated alerts** - Frequent protection triggers indicate a
+  system issue
 
 ## Integration with Other Categories
 
@@ -122,18 +147,23 @@ Safety blueprints work alongside optimization and monitoring automations:
 
 - **Override optimization** - Safety always takes precedence over efficiency
 - **Generate alerts** - Feed into monitoring systems for trend analysis
-- **Emergency mode** - Optimization automations should respect safety-triggered modes
+- **Emergency mode** - Optimization automations should respect safety-triggered
+  modes
 
 ## Maintenance
 
-- **Review thresholds quarterly** - As batteries age, you may need to adjust protection levels
-- **Check logs after events** - Review what triggered protection and if settings need adjustment
+- **Review thresholds quarterly** - As batteries age, you may need to adjust
+  protection levels
+- **Check logs after events** - Review what triggered protection and if settings
+  need adjustment
 - **Update firmware** - Keep inverter firmware current for best fault detection
-- **Test annually** - Verify safety automations trigger correctly in controlled scenarios
+- **Test annually** - Verify safety automations trigger correctly in controlled
+  scenarios
 
 ## Getting Help
 
 If safety automations are frequently triggering:
+
 1. Check battery health and age
 2. Verify sensor calibration
 3. Review inverter logs for underlying issues
@@ -145,4 +175,4 @@ If safety automations are frequently triggering:
 - [Main Blueprint Documentation](../README.md)
 - [Optimization Blueprints](../2_optimization/README.md)
 - [Monitoring Blueprints](../3_monitoring/README.md)
-- [Integration Configuration Guide](../../../../docs/integration-setup.md)
+- [Integration Quick Start](../../../../docs/QUICK_START.md)

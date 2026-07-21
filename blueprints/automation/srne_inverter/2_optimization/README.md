@@ -1,10 +1,14 @@
 # Optimization Blueprints
 
-This directory contains automation blueprints focused on maximizing energy efficiency, reducing costs, and optimizing system performance.
+This directory contains automation blueprints focused on maximizing energy
+efficiency, reducing costs, and optimizing system performance.
 
 ## Purpose
 
-Optimization blueprints intelligently manage energy flows to minimize electricity costs, maximize solar utilization, and improve overall system efficiency. These automations enhance your system's economic performance while respecting safety constraints.
+Optimization blueprints intelligently manage energy flows to minimize
+electricity costs, maximize solar utilization, and improve overall system
+efficiency. These automations enhance your system's economic performance while
+respecting safety constraints.
 
 ## Available Blueprints
 
@@ -13,22 +17,26 @@ Optimization blueprints intelligently manage energy flows to minimize electricit
 **Purpose:** Reduce grid power consumption during expensive peak rate periods
 
 **What it does:**
+
 - Monitors time-of-use periods
 - Tracks grid power import levels
 - Automatically switches to battery power during peak hours
 - Protects battery by respecting minimum SOC thresholds
 
 **When to use:**
+
 - **Essential** if your utility has time-of-use (TOU) pricing
 - Highly valuable for reducing electricity bills in areas with demand charges
 - Useful for load balancing during high-usage periods
 
 **Economic impact:**
+
 - Can reduce electricity costs by 30-50% with TOU rates
 - Typically pays for battery system faster through peak avoidance
 - Reduces strain on grid during peak demand
 
 **Key features:**
+
 - Configurable peak hours (start/end times)
 - Grid import threshold triggering
 - Battery protection (won't discharge below minimum SOC)
@@ -37,6 +45,7 @@ Optimization blueprints intelligently manage energy flows to minimize electricit
 - Optional notifications for mode changes
 
 **Typical configuration:**
+
 ```yaml
 Peak hours: 16:00 - 21:00 (adjust to your utility's schedule)
 Grid import threshold: 1000W
@@ -46,6 +55,7 @@ Off-peak priority: "Solar First"
 ```
 
 **Best practices:**
+
 - Align peak hours exactly with your utility's TOU schedule
 - Set import threshold based on your typical usage patterns
 - Reserve enough battery capacity for the full peak period
@@ -58,23 +68,27 @@ Off-peak priority: "Solar First"
 **Purpose:** Maximize solar self-consumption and minimize grid export/import
 
 **What it does:**
+
 - Monitors solar production levels
 - Tracks battery state of charge
 - Intelligently routes solar power to maximize self-consumption
 - Adjusts priority modes based on production and battery status
 
 **When to use:**
+
 - **Recommended** for all solar+storage installations
 - Essential when grid export rates are low or zero
 - Critical for maximizing solar ROI in areas with net metering caps
 - Valuable for reducing grid dependency
 
 **Economic impact:**
+
 - Increases solar self-consumption from ~30% to 70-90%
 - Maximizes value when export rates < import rates
 - Reduces battery cycles by smarter charging strategies
 
 **Key features:**
+
 - Multi-level solar production tracking (low/medium/high)
 - Intelligent battery charging during excess solar
 - Dynamic priority switching based on conditions
@@ -83,6 +97,7 @@ Off-peak priority: "Solar First"
 - Load-aware solar routing
 
 **Typical configuration:**
+
 ```yaml
 High production threshold: 3000W (adjust to your array size)
 Medium production threshold: 1500W
@@ -92,9 +107,11 @@ Low solar priority: "Battery First" (supplement from battery)
 ```
 
 **Best practices:**
+
 - Scale thresholds to your solar array size (typically 20-40% of peak)
 - Consider seasonal variations in solar production
-- Coordinate with peak shaving (solar optimization during day, peak shaving at night)
+- Coordinate with peak shaving (solar optimization during day, peak shaving at
+  night)
 - Adjust battery charge thresholds based on usage patterns
 
 ---
@@ -106,6 +123,7 @@ Low solar priority: "Battery First" (supplement from battery)
 Both blueprints work together to create a comprehensive optimization strategy:
 
 **Daily cycle example:**
+
 ```
 06:00-10:00: Solar Optimization (morning production builds up)
 10:00-16:00: Solar Optimization (peak production, charge battery)
@@ -145,7 +163,8 @@ Track these metrics to optimize your automations:
    - Target: < 10% of daily grid import during peak hours
    - Track monthly to verify peak shaving effectiveness
 
-3. **Solar utilization**: Direct solar use + battery charging / Total solar production
+3. **Solar utilization**: Direct solar use + battery charging / Total solar
+   production
    - Target: > 95% (minimize grid export)
    - Lower? Adjust battery charging thresholds
 
@@ -175,11 +194,13 @@ Track these metrics to optimize your automations:
 ### Seasonal Adjustments
 
 **Summer (high solar):**
+
 - Lower minimum battery SOC (30%)
 - Earlier peak shaving start (more daylight to recharge)
 - Higher solar production thresholds
 
 **Winter (low solar):**
+
 - Higher minimum battery SOC (40-50%)
 - Later peak shaving start (less daylight to recharge)
 - Lower solar production thresholds
@@ -224,6 +245,7 @@ Typical results:
 ### Payback Period Impact
 
 Well-tuned optimization can reduce battery system payback period by:
+
 - 20-40% in areas with significant TOU rate differences
 - 30-50% in areas with high import rates and low export rates
 - 10-20% in areas with flat rates (still valuable for grid independence)
@@ -233,24 +255,28 @@ Well-tuned optimization can reduce battery system payback period by:
 ### Common Issues
 
 **Peak shaving not activating:**
+
 - Verify peak hours match utility schedule
 - Check grid import sensor is working
 - Ensure battery SOC is above minimum
 - Review hysteresis duration setting
 
 **Battery draining too fast during peak hours:**
+
 - Increase minimum battery SOC
 - Reduce peak shaving window
 - Check for excessive loads during peak hours
 - Verify solar optimization is charging battery during day
 
 **Solar not being fully utilized:**
+
 - Lower battery charge threshold
 - Adjust production thresholds for your array size
 - Check if grid export is unnecessarily enabled
 - Verify solar priority mode is "Solar First"
 
 **Frequent mode switching:**
+
 - Increase hysteresis duration
 - Widen production threshold bands
 - Check for sensor noise or fluctuations
@@ -258,14 +284,17 @@ Well-tuned optimization can reduce battery system payback period by:
 
 ## Related Documentation
 
-- [Safety Blueprints](../1_safety/README.md) - Always prioritized over optimization
-- [Monitoring Blueprints](../3_monitoring/README.md) - Track optimization performance
+- [Safety Blueprints](../1_safety/README.md) - Always prioritized over
+  optimization
+- [Monitoring Blueprints](../3_monitoring/README.md) - Track optimization
+  performance
 - [Main Blueprint Documentation](../README.md)
-- [Energy Flow Diagrams](../../../../docs/energy-flows.md)
+- [Integration Architecture](../../../../docs/ARCHITECTURE.md)
 
 ## Getting Help
 
 For optimization questions:
+
 1. Share your utility rate structure (TOU schedule, rates)
 2. Provide system sizing (solar array, battery capacity)
 3. Describe typical daily usage patterns

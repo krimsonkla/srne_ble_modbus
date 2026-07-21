@@ -2,17 +2,18 @@
 
 ## Supported Versions
 
-This project is currently in active development. Security updates will be provided for:
+This project is currently in active development. Security updates will be
+provided for:
 
 | Version | Supported          |
 | ------- | ------------------ |
 | main    | :white_check_mark: |
-| develop | :white_check_mark: |
 | < 1.0   | :x:                |
 
 ## Reporting a Vulnerability
 
-**CRITICAL: Do NOT report security vulnerabilities through public GitHub issues.**
+**CRITICAL: Do NOT report security vulnerabilities through public GitHub
+issues.**
 
 ### For Security Issues
 
@@ -26,7 +27,8 @@ If you discover a security vulnerability, please follow these steps:
 
 Send a detailed report to the project maintainers via:
 
-- **GitHub Security Advisory**: [Create a private security advisory](https://github.com/krimsonkla/srne_ble_modbus/security/advisories/new)
+- **GitHub Security Advisory**:
+  [Create a private security advisory](https://github.com/krimsonkla/srne_ble_modbus/security/advisories/new)
 - **Email**: Contact maintainers directly (see GitHub profiles)
 
 ### What to Include
@@ -72,6 +74,7 @@ Contact:
 ## Safety-Critical Issues
 
 This software controls electrical equipment. Security issues that could lead to:
+
 - Hardware damage
 - Fire hazards
 - Electrical hazards
@@ -108,7 +111,8 @@ We follow **responsible disclosure**:
 2. We acknowledge receipt within the timeline above
 3. We investigate and develop a fix
 4. We release a security patch
-5. After patch is available and users have time to update (typically 30 days), we publicly disclose:
+5. After patch is available and users have time to update (typically 30 days),
+   we publicly disclose:
    - The vulnerability details
    - Credit to the reporter (if desired)
    - The fix and affected versions
@@ -181,12 +185,14 @@ We actively work to improve security:
 ## Third-Party Dependencies
 
 This software depends on:
+
 - Home Assistant Core
 - bleak (BLE library)
 - bleak-retry-connector
 - Other Python packages
 
 Security issues in dependencies should be:
+
 1. Reported to the dependency maintainers
 2. Also reported to us if they affect our integration
 3. We will update dependencies when fixes are available
@@ -200,6 +206,7 @@ We thank the following researchers for responsible disclosure:
 ## Questions?
 
 For non-security questions about:
+
 - General security best practices
 - Configuration recommendations
 - Safe operation guidelines
@@ -210,6 +217,8 @@ For actual security vulnerabilities, follow the reporting process above.
 
 ---
 
-**Remember**: This software controls electrical equipment. Security is not just about data - it's about physical safety. Report security issues responsibly to protect all users.
+**Remember**: This software controls electrical equipment. Security is not just
+about data - it's about physical safety. Report security issues responsibly to
+protect all users.
 
 **Last Updated**: February 5, 2026

@@ -1,180 +1,111 @@
-# SRNE BLE Modbus Documentation Index
+# SRNE BLE Modbus — Documentation Index
 
-Complete documentation for the SRNE BLE Modbus Home Assistant integration.
+Map of the documentation for the SRNE BLE Modbus Home Assistant integration.
 
-## ⚠️ DISCLAIMER
+## ⚠️ Disclaimer
 
-**USE AT YOUR OWN RISK**
+**USE AT YOUR OWN RISK.** This software interfaces directly with your SRNE
+inverter over BLE. Improper configuration or use may damage your inverter or
+battery, void your warranty, or cause equipment malfunction.
 
-This software interfaces directly with your SRNE inverter via BLE.
-Improper configuration or use may:
-- Damage your BLE device
-- Damage your inverter
-- Void your warranty
-- Cause data loss
-- Result in equipment malfunction
+**Always** test in safe conditions first, keep your battery manufacturer's
+specifications to hand, monitor the system closely during initial setup, and
+have manual override procedures ready.
 
-**ALWAYS:**
-- Test in safe conditions first
-- Keep battery manufacturer specifications handy
-- Monitor system closely during initial setup
-- Have manual override procedures ready
-- Back up your configuration
-
-The authors assume NO LIABILITY for any damage or loss.
+See [DISCLAIMER.md](../DISCLAIMER.md) for the complete safety warnings and legal
+terms. The authors assume no liability for any damage or loss.
 
 ---
 
-## Quick Start
+## Start Here
 
-### New Users
-1. [Installation Guide](../README.md#installation)
-2. [Quick Start Guide](QUICK_START.md)
-3. [Essential Safety Blueprints](../blueprints/automation/srne_inverter/QUICK_START.md)
+### Users
+
+1. [Installation](../README.md#installation) — HACS or manual install
+2. [Quick Start](QUICK_START.md) — step-by-step first-time setup
+3. [Automation Blueprints](../blueprints/automation/srne_inverter/README.md) —
+   27 ready-made automations
+4. [Troubleshooting](TROUBLESHOOTING.md) — when something isn't working
 
 ### Developers
-1. [Architecture Overview](ARCHITECTURE.md)
-2. [BLE Protocol Specification](BLE_PROTOCOL.md)
-3. [Register Mapping](REGISTER_MAPPING.md)
+
+1. [Architecture](ARCHITECTURE.md) — layering, DI container, data flow
+2. [BLE Protocol](BLE_PROTOCOL.md) — transport framing, CRC, register semantics
+3. [Test Suite](../tests/README.md) — test layout and how to run it
+4. [Contributing](../CONTRIBUTING.md) — workflow and safety requirements
 
 ---
 
 ## Core Documentation
 
-### Installation & Setup
-- [**README.md**](../README.md) - Main project overview and installation
-- [**QUICK_START.md**](QUICK_START.md) - Step-by-step setup guide
-- [**Configuration Guide**](CONFIGURATION.md) - Detailed configuration options
+| Document                                 | Contents                                      |
+| ---------------------------------------- | --------------------------------------------- |
+| [README](../README.md)                   | Project overview, installation, configuration |
+| [QUICK_START.md](QUICK_START.md)         | First-time setup walkthrough                  |
+| [ARCHITECTURE.md](ARCHITECTURE.md)       | System design, layer boundaries, DI container |
+| [BLE_PROTOCOL.md](BLE_PROTOCOL.md)       | Modbus-over-BLE transport details             |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Connection, register, and entity issues       |
+| [AUTOMATIONS.md](../AUTOMATIONS.md)      | How the blueprint library is organized        |
 
-### Technical Documentation
-- [**Architecture Overview**](ARCHITECTURE.md) - System design and components
-- [**BLE Protocol**](BLE_PROTOCOL.md) - Bluetooth Low Energy communication
-- [**Register Mapping**](REGISTER_MAPPING.md) - Complete Modbus register reference
-- [**Services**](services.md) - Available service calls
+## Project Documents
 
-### User Guides
-- [**Automation Blueprints**](../blueprints/automation/srne_inverter/README.md) - Pre-built automations
-- [**Energy Dashboard**](energy_dashboard_integration.md) - Energy monitoring setup
-- [**Troubleshooting**](TROUBLESHOOTING.md) - Common issues and solutions
+| Document                              | Contents                                         |
+| ------------------------------------- | ------------------------------------------------ |
+| [DISCLAIMER.md](../DISCLAIMER.md)     | Safety warnings and legal terms — **read first** |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | Contribution guidelines and dev setup            |
+| [SECURITY.md](../SECURITY.md)         | Security policy and responsible disclosure       |
+| [LICENSE](../LICENSE)                 | MIT License                                      |
 
 ---
 
-## Advanced Topics
+## Reference Material
 
-### Protocol & Communication
-- [BLE Communication Details](ble-communication-flow.md)
-- [Modbus Protocol Mapping](modbus-protocol-mapping.md)
-- [Password Authentication](PASSWORD_AUTHENTICATION.md)
+Vendor documentation this integration was built against:
 
-### Development
-- [Entity Configuration Schema](ENTITY_CONFIGURATION_SCHEMA.md)
-- [Extensibility Guide](EXTENSIBILITY_GUIDE.md)
-- [Testing Guide](TESTING.md)
+- [SRNE Energy Storage Inverter Protocol v1.96](../resources/SRNE_Energy_Storage_Inverter_Protocol_v1.96.md)
+  — complete Modbus register reference
+- [SRNE HF Series User Manual](../resources/SRNE_HF_Series_User_Manual.md) —
+  hardware documentation
 
-### Optimization
-- [Performance Analysis](PERFORMANCE_ANALYSIS.md)
-- [Model-Specific Features](MODEL_SPECIFIC_FEATURES.md)
+### Device Information
+
+- **Supported models**: SRNE HF Series (2000W–3000W)
+- **Communication**: Bluetooth Low Energy (BLE)
+- **Protocol**: Modbus RTU over BLE GATT
+- **Default update interval**: 30 seconds
 
 ---
 
 ## Automation Blueprints
 
-### Safety (Essential)
-Located in: `blueprints/automation/srne_inverter/1_safety/`
+Located under `blueprints/automation/srne_inverter/`.
 
-1. Progressive Battery Protection
-2. Temperature Protection
-3. Grid Failure Detection
-4. Fault Response
-5. And 6 more critical safety automations
+| Category                   | Count | Documentation                                                                               |
+| -------------------------- | ----- | ------------------------------------------------------------------------------------------- |
+| Safety (essential)         | 10    | [1_safety/README.md](../blueprints/automation/srne_inverter/1_safety/README.md)             |
+| Optimization (recommended) | 10    | [2_optimization/README.md](../blueprints/automation/srne_inverter/2_optimization/README.md) |
+| Monitoring (optional)      | 7     | [3_monitoring/README.md](../blueprints/automation/srne_inverter/3_monitoring/README.md)     |
 
-[Full Safety Documentation](../blueprints/automation/srne_inverter/1_safety/README.md)
+Safety blueprints cover progressive battery protection, temperature protection,
+grid failure detection, and fault response. Optimization covers peak shaving,
+solar optimization, smart night charging, and dynamic current limiting.
+Monitoring covers performance dashboards, battery health tracking, and fault
+alerting.
 
-### Optimization (Recommended)
-Located in: `blueprints/automation/srne_inverter/2_optimization/`
-
-1. Peak Shaving Optimizer
-2. Solar Optimization
-3. Smart Night Charging
-4. Dynamic Current Limiter
-5. And 6 more efficiency automations
-
-[Full Optimization Documentation](../blueprints/automation/srne_inverter/2_optimization/README.md)
-
-### Monitoring (Optional)
-Located in: `blueprints/automation/srne_inverter/3_monitoring/`
-
-1. Daily Performance Dashboard
-2. Battery Health Tracker
-3. Fault Monitor
-4. And 4 more monitoring automations
-
-[Full Monitoring Documentation](../blueprints/automation/srne_inverter/3_monitoring/README.md)
-
----
-
-## Reference Materials
-
-### Register Maps
-- [Inverter Manual Mapping](inverter-manual-mapping.md)
-- [Configurable Settings](SRNE_CONFIGURABLE_SETTINGS.md)
-- [Unsupported Features](UNSUPPORTED_FEATURES_ANALYSIS.md)
-
-### Device Information
-- Supported Models: SRNE HF Series (2000W-3000W)
-- Communication: Bluetooth Low Energy (BLE)
-- Protocol: Modbus RTU over BLE
-- Update Interval: 30 seconds default
-
----
-
-## Troubleshooting Resources
-
-### Common Issues
-- [BLE Connection Problems](TROUBLESHOOTING.md#ble-connection)
-- [Register Read Errors](TROUBLESHOOTING.md#register-errors)
-- [Permission Denied Errors](PASSWORD_AUTHENTICATION.md)
-- [Entity Not Available](TROUBLESHOOTING.md#entity-issues)
-
-### Debug Tools
-- [Debug Raw Values](DEBUG_RAW_VALUES.md)
-- [Auto-Hide Unsupported Entities](AUTO_HIDE_UNSUPPORTED.md)
+Start with
+[the blueprint overview](../blueprints/automation/srne_inverter/README.md).
 
 ---
 
 ## Version Information
 
-- **Integration Version**: 1.0.0
-- **Protocol Version**: Modbus RTU over BLE
-- **Minimum HA Version**: 2024.11.0
-- **Last Updated**: 2026-02-05
+- **Integration version**: 0.5.0 — authoritative source is
+  [`manifest.json`](../custom_components/srne_inverter/manifest.json)
+- **Minimum Home Assistant version**: 2024.12.0
+- **Protocol**: Modbus RTU over BLE
 
----
+## Support
 
-## Support & Community
-
-- **GitHub Repository**: https://github.com/krimsonkla/srne_ble_modbus
+- **Repository**: https://github.com/krimsonkla/srne_ble_modbus
 - **Issues**: https://github.com/krimsonkla/srne_ble_modbus/issues
 - **Discussions**: https://github.com/krimsonkla/srne_ble_modbus/discussions
-
----
-
-## Contributing
-
-We welcome contributions. Please review:
-- [Architecture Documentation](ARCHITECTURE.md)
-- [Extensibility Guide](EXTENSIBILITY_GUIDE.md)
-- [Testing Guidelines](TESTING.md)
-
-Submit pull requests with:
-- Clear description of changes
-- Updated documentation
-- Test coverage for new features
-
----
-
-## License
-
-This project is licensed under the terms specified in the LICENSE file.
-
-**No warranty or liability is provided. Use at your own risk.**

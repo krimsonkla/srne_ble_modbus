@@ -6,8 +6,9 @@ Get your SRNE inverter connected to Home Assistant in under 10 minutes.
 
 **USE AT YOUR OWN RISK**
 
-This software interfaces directly with your SRNE inverter via BLE.
-Improper configuration or use may:
+This software interfaces directly with your SRNE inverter via BLE. Improper
+configuration or use may:
+
 - Damage your BLE device
 - Damage your inverter
 - Void your warranty
@@ -15,6 +16,7 @@ Improper configuration or use may:
 - Result in equipment malfunction
 
 **ALWAYS:**
+
 - Test in safe conditions first
 - Keep battery manufacturer specifications handy
 - Monitor system closely during initial setup
@@ -29,7 +31,7 @@ The authors assume NO LIABILITY for any damage or loss.
 
 Before starting, ensure you have:
 
-- [ ] Home Assistant 2024.11 or later installed
+- [ ] Home Assistant 2024.12.0 or later installed
 - [ ] Bluetooth adapter with BLE support
 - [ ] SRNE HF Series inverter with BLE enabled
 - [ ] Inverter powered on and within 10 meters of HA server
@@ -74,11 +76,12 @@ Before starting, ensure you have:
 
 The integration will automatically scan for BLE devices:
 
-- Look for devices starting with **E6** (e.g., E60000231107692658)
+- Look for devices starting with **E6** (e.g., `E60000XXXXXXXXXXXX`)
 - Select your inverter from the list
 - Click **Submit**
 
 If no devices appear:
+
 - Verify inverter is powered on
 - Check Bluetooth is enabled in Home Assistant
 - Move HA server closer to inverter
@@ -91,6 +94,7 @@ If no devices appear:
 ### Basic Setup (Recommended)
 
 The integration will use default settings:
+
 - **Update Interval**: 30 seconds
 - **Register Scanning**: Automatic
 - **Password**: None (configure if needed)
@@ -136,7 +140,8 @@ Configure password authentication if needed:
 
 ## Step 5: Essential Safety Setup
 
-**CRITICAL: Install at least one safety automation before using writable controls.**
+**CRITICAL: Install at least one safety automation before using writable
+controls.**
 
 ### Recommended First Automation
 
@@ -167,6 +172,7 @@ Configure password authentication if needed:
 ### Available Entities
 
 **Sensors (Read-Only)**:
+
 - Battery State of Charge (%)
 - Battery Voltage (V)
 - Battery Current (A)
@@ -179,12 +185,14 @@ Configure password authentication if needed:
 - AC Output Load (W)
 
 **Controls (Writable)**:
+
 - Output Priority Mode (select)
 - Charge Current Limit (number)
 - Battery Type (select)
 - Charging Enable/Disable (switch)
 
 **Services**:
+
 - `srne_inverter.force_refresh` - Force immediate update
 - `srne_inverter.reset_statistics` - Reset diagnostic counters
 - `srne_inverter.restart_inverter` - Restart inverter (requires confirmation)
@@ -206,6 +214,7 @@ Configure password authentication if needed:
 **Symptoms**: Integration setup fails to discover devices
 
 **Solutions**:
+
 1. Verify inverter is powered on and within range
 2. Check Home Assistant Bluetooth is enabled:
    - **Settings** → **System** → **Hardware**
@@ -221,6 +230,7 @@ Configure password authentication if needed:
 **Symptoms**: Cannot write to registers, error "Permission denied"
 
 **Solutions**:
+
 1. Configure password in integration settings
 2. Try common defaults in order:
    - 4321 (most common)
@@ -235,6 +245,7 @@ Configure password authentication if needed:
 **Symptoms**: Entities show "unavailable" or update slowly
 
 **Solutions**:
+
 1. Check BLE connection strength (move HA closer)
 2. Verify no interference from other Bluetooth devices
 3. Check Home Assistant system resources
@@ -247,6 +258,7 @@ Configure password authentication if needed:
 **Symptoms**: Some entities missing or showing "unavailable"
 
 **Solutions**:
+
 1. Verify register is supported by your model
 2. Check integration logs for read errors
 3. Enable debug logging:
@@ -288,7 +300,7 @@ Configure password authentication if needed:
 - [Full Documentation Index](INDEX.md)
 - [Automation Blueprints](../blueprints/automation/srne_inverter/README.md)
 - [Troubleshooting Guide](TROUBLESHOOTING.md)
-- [Services Reference](services.md)
+- [BLE Protocol](BLE_PROTOCOL.md)
 
 ---
 
@@ -324,5 +336,3 @@ If you encounter issues:
 **Support is provided on a best-effort basis. No guarantees or warranties.**
 
 ---
-
-**Last Updated**: 2026-02-05
