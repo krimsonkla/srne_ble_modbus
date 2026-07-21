@@ -32,6 +32,8 @@ from ...const import (
     BLE_DISCOVERY_TIMEOUT,
     MODBUS_RESPONSE_TIMEOUT,
     MAX_CONSECUTIVE_TIMEOUTS,
+    BLE_WRITE_WITH_RESPONSE,
+    BLE_WRITE_PROCESSING_DELAY,
 )
 from ..decorators import handle_transport_errors
 
@@ -104,7 +106,10 @@ class BLETransport(ITransport):
         self._learned_timeouts = timeouts
         _LOGGER.info(
             "Applied learned timeouts: %s",
-            {op: f"{val:.2f}s" for op, val in timeouts.items()},
+            {
+                op: f"{val:.2f}s" if isinstance(val, (int, float)) else str(val)
+                for op, val in timeouts.items()
+            },
         )
 
     async def connect(
@@ -132,6 +137,8 @@ class BLETransport(ITransport):
             >>> assert success is True
         """
         self._address = address
+        _connect_start = time.time()
+        _LOGGER.debug("[SRNE_TRACE] connect() ENTRY addr=%s", address)
 
         # CRITICAL: Close any stale connections first (Home Assistant best practice)
         # This prevents zombie connections where BleakClient reports connected
@@ -233,7 +240,11 @@ class BLETransport(ITransport):
                             err,
                             exc_info=True,
                         )
-                        await self.disconnect()
+                        _LOGGER.debug(
+                            "[SRNE_TRACE] connect() start_notify FAIL after %d attempts",
+                            max_notify_attempts,
+                        )
+                        await self.disconnect(reason="start_notify_failed")
                         return False
                     _LOGGER.debug(
                         "NOTIFY_UUID subscription attempt %d failed, retrying: %s",
@@ -246,19 +257,30 @@ class BLETransport(ITransport):
             # Reset circuit breaker on successful connection
             self._consecutive_timeouts = 0
             _LOGGER.info("BLE transport connected to %s", address)
+            _LOGGER.debug(
+                "[SRNE_TRACE] connect() OK addr=%s dt=%.2fs",
+                address,
+                time.time() - _connect_start,
+            )
             return True
 
         except (BleakError, asyncio.TimeoutError) as err:
             _LOGGER.error("Failed to establish connection: %s", err, exc_info=True)
-            if self._client:
-                try:
-                    await self._client.disconnect()
-                except Exception:
-                    pass
-                self._client = None
+            _LOGGER.debug(
+                "[SRNE_TRACE] connect() FAIL addr=%s dt=%.2fs err_type=%s err=%s",
+                address,
+                time.time() - _connect_start,
+                type(err).__name__,
+                err,
+            )
+            # Route through disconnect() rather than a bare client.disconnect()
+            # so a partially-acquired NOTIFY subscription is released too;
+            # otherwise a failed start_notify can leave a stale handle that
+            # blocks the next connect with "Notify acquired".
+            await self.disconnect(reason="connect_failed")
             return False
 
-    async def disconnect(self) -> None:
+    async def disconnect(self, reason: str = "unknown") -> None:
         """Disconnect from BLE device.
 
         This method:
@@ -268,33 +290,65 @@ class BLETransport(ITransport):
         4. Resets circuit breaker timeout counter
         5. Updates connection state
 
+        Args:
+            reason: Diagnostic tag for who initiated the disconnect. Used by
+                [SRNE_TRACE] logging to attribute drops back to their source
+                so we can distinguish integration-initiated disconnects from
+                peer/link-layer drops.
+
         Example:
-            >>> await transport.disconnect()
+            >>> await transport.disconnect(reason="shutdown")
             >>> assert not transport.is_connected
         """
+        _disc_start = time.time()
+        was_client = self._client is not None
+        was_connected_flag = self._connected
+        client_says_connected = (
+            self._client.is_connected if self._client is not None else False
+        )
+        _LOGGER.debug(
+            "[SRNE_TRACE] disconnect() ENTRY reason=%s addr=%s had_client=%s "
+            "connected_flag=%s client_is_connected=%s",
+            reason,
+            self._address,
+            was_client,
+            was_connected_flag,
+            client_says_connected,
+        )
         if not self._client:
+            _LOGGER.debug(
+                "[SRNE_TRACE] disconnect() NOOP reason=%s (no client)", reason
+            )
             return
 
         try:
-            # Stop notifications
-            if self._client.is_connected:
-                # Stop NOTIFY UUID
-                try:
-                    await asyncio.wait_for(
-                        self._client.stop_notify(BLE_NOTIFY_UUID),
-                        timeout=BLE_DISCONNECT_TIMEOUT,
-                    )
-                    _LOGGER.debug("Stopped BLE_NOTIFY_UUID notifications")
-                except (Exception, asyncio.TimeoutError) as err:
-                    _LOGGER.debug(
-                        "Stop notify NOTIFY_UUID error (non-critical): %s", err
-                    )
+            # Always attempt to release the NOTIFY subscription, even when the
+            # link is already down. BlueZ keeps the notify acquisition open on
+            # the characteristic after an unclean drop (e.g. an ATT 0x0e on a
+            # write), and a subsequent connect() then fails start_notify() with
+            # [org.bluez.Error.NotPermitted] Notify acquired -- looping until
+            # BlueZ times the stale handle out on its own (~minutes). Gating
+            # stop_notify behind is_connected skips cleanup exactly when it is
+            # needed most, so the call is made unconditionally and its errors
+            # are swallowed as non-critical.
+            try:
+                await asyncio.wait_for(
+                    self._client.stop_notify(BLE_NOTIFY_UUID),
+                    timeout=BLE_DISCONNECT_TIMEOUT,
+                )
+                _LOGGER.debug("Stopped BLE_NOTIFY_UUID notifications")
+            except (Exception, asyncio.TimeoutError) as err:
+                _LOGGER.debug("Stop notify NOTIFY_UUID error (non-critical): %s", err)
 
-                # Disconnect
+            # Disconnect the client regardless of cached connection state so the
+            # backend tears down its D-Bus objects and frees the slot.
+            try:
                 await asyncio.wait_for(
                     self._client.disconnect(), timeout=BLE_DISCONNECT_TIMEOUT
                 )
                 _LOGGER.debug("BLE connection closed")
+            except (Exception, asyncio.TimeoutError) as err:
+                _LOGGER.debug("Client disconnect error (non-critical): %s", err)
 
         except Exception as err:
             _LOGGER.warning("Error during disconnect: %s", err)
@@ -304,6 +358,11 @@ class BLETransport(ITransport):
             self._connected = False
             self._consecutive_timeouts = 0  # Reset circuit breaker on disconnect
             self._clear_notification_queue()
+            _LOGGER.debug(
+                "[SRNE_TRACE] disconnect() DONE reason=%s dt=%.2fs",
+                reason,
+                time.time() - _disc_start,
+            )
 
     @handle_transport_errors("BLE send", reraise=True)
     async def send(
@@ -380,8 +439,13 @@ class BLETransport(ITransport):
                 "Circuit breaker opened after %d consecutive timeouts - forcing disconnect",
                 timeout_count,
             )
+            _LOGGER.debug(
+                "[SRNE_TRACE] circuit_breaker OPENED timeouts=%d/%d",
+                timeout_count,
+                MAX_CONSECUTIVE_TIMEOUTS,
+            )
             # Force disconnect to trigger reconnection on next attempt
-            await self.disconnect()
+            await self.disconnect(reason="circuit_breaker")
             raise RuntimeError(
                 f"Connection circuit breaker opened after {timeout_count} timeouts. "
                 "Connection will be re-established on next update."
@@ -401,14 +465,25 @@ class BLETransport(ITransport):
         timing_start = time.time()
 
         try:
-            # Step 1: Write command WITH response (wait for ACK)
-            await self._client.write_gatt_char(BLE_WRITE_UUID, data, response=True)
+            # Step 1: Write command.
+            # BLE_WRITE_WITH_RESPONSE=True  -> ATT Write Request: waits for the
+            #   device ACK and may raise a device-side 0x0e here.
+            # BLE_WRITE_WITH_RESPONSE=False -> ATT Write Command: returns at once,
+            #   so a brief settle delay is applied before the read so it does not
+            #   race the device storing its result code.
+            await self._client.write_gatt_char(
+                BLE_WRITE_UUID, data, response=BLE_WRITE_WITH_RESPONSE
+            )
             if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug("Write acknowledged by device (response=True completed)")
+                _LOGGER.debug("Write issued (response=%s)", BLE_WRITE_WITH_RESPONSE)
 
-            # Step 2: Read characteristic to get result code
-            # Note: BLE_WRITE_PROCESSING_DELAY removed (2026-02-11) - testing showed
-            # the delay was unnecessary. The BLE stack and device handle timing correctly.
+            if not BLE_WRITE_WITH_RESPONSE and BLE_WRITE_PROCESSING_DELAY > 0:
+                await asyncio.sleep(BLE_WRITE_PROCESSING_DELAY)
+
+            # Step 2: Read characteristic to get result code.
+            # Note: with response=True the ATT ACK already gates this read. With
+            # response=False the settle delay above (BLE_WRITE_PROCESSING_DELAY)
+            # plays that role, so the read still reflects the stored result code.
             result_code = await self._client.read_gatt_char(BLE_WRITE_UUID)
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug(
@@ -530,6 +605,11 @@ class BLETransport(ITransport):
             # RuntimeError → UseCase handles → UpdateFailed → ConfigEntryNotReady
             _LOGGER.warning("BLE connection error during send: %s", err)
             _LOGGER.debug("=== BLE WRITE-READ-NOTIFY OPERATION CONNECTION ERROR ===")
+            _LOGGER.debug(
+                "[SRNE_TRACE] send() BleakError err_type=%s err=%s",
+                type(err).__name__,
+                err,
+            )
 
             # Phase 2: Record connection error
             if self._timing_collector:
@@ -542,7 +622,7 @@ class BLETransport(ITransport):
                 )
 
             # Force disconnect to ensure clean state
-            await self.disconnect()
+            await self.disconnect(reason="send_bleak_error")
             raise RuntimeError(f"BLE connection lost during send: {err}") from err
 
         except Exception as err:

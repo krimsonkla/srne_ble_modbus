@@ -3,14 +3,19 @@
 Tests core storage and runtime functionality without complex mocking.
 """
 
-import pytest
 import tempfile
 import json
 from pathlib import Path
 
-from custom_components.srne_inverter.application.services.timing_collector import TimingCollector
-from custom_components.srne_inverter.application.services.timeout_learner import TimeoutLearner
-from custom_components.srne_inverter.infrastructure.transport.ble_transport import BLETransport
+from custom_components.srne_inverter.application.services.timing_collector import (
+    TimingCollector,
+)
+from custom_components.srne_inverter.application.services.timeout_learner import (
+    TimeoutLearner,
+)
+from custom_components.srne_inverter.infrastructure.transport.ble_transport import (
+    BLETransport,
+)
 from unittest.mock import Mock
 
 
@@ -126,8 +131,11 @@ class TestEndToEndSimple:
 
             assert learned_timeout is not None
 
-            # Phase 4: Save to storage
-            learned_timeouts = learner.calculate_all_timeouts()
+            # Phase 4: Save to storage. Production stores .timeout floats,
+            # not the LearnedTimeout objects themselves.
+            learned_timeouts = {
+                op: lt.timeout for op, lt in learner.calculate_all_timeouts().items()
+            }
             data = {"learned_timeouts": learned_timeouts}
             storage_file.write_text(json.dumps(data))
 
@@ -140,7 +148,7 @@ class TestEndToEndSimple:
             transport.set_learned_timeouts(reloaded_timeouts)
 
             # Verify learned timeout applied
-            assert transport._learned_timeouts["modbus_read"] == learned_timeout
+            assert transport._learned_timeouts["modbus_read"] == learned_timeout.timeout
 
     def test_fast_hardware_e2e(self):
         """Test E2E for fast hardware."""
@@ -154,7 +162,11 @@ class TestEndToEndSimple:
                 collector.record("modbus_read", 300.0 + i * 4, success=True)
 
             learner = TimeoutLearner(collector)
-            learned_timeouts = learner.calculate_all_timeouts()
+            # calculate_all_timeouts() returns Dict[str, LearnedTimeout]; production
+            # code stores just the .timeout float (see coordinator._update_learned_timeouts).
+            learned_timeouts = {
+                op: lt.timeout for op, lt in learner.calculate_all_timeouts().items()
+            }
 
             # Save
             storage_file.write_text(json.dumps({"learned_timeouts": learned_timeouts}))
@@ -180,7 +192,11 @@ class TestEndToEndSimple:
                 collector.record("modbus_read", 1500.0 + i * 40, success=True)
 
             learner = TimeoutLearner(collector)
-            learned_timeouts = learner.calculate_all_timeouts()
+            # calculate_all_timeouts() returns Dict[str, LearnedTimeout]; production
+            # code stores just the .timeout float (see coordinator._update_learned_timeouts).
+            learned_timeouts = {
+                op: lt.timeout for op, lt in learner.calculate_all_timeouts().items()
+            }
 
             # Save
             storage_file.write_text(json.dumps({"learned_timeouts": learned_timeouts}))

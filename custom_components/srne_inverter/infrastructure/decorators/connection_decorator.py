@@ -71,7 +71,9 @@ def require_connection(
             finally:
                 if auto_disconnect and hasattr(self, "_transport"):
                     if self._transport.is_connected:
-                        await self._transport.disconnect()
+                        await self._transport.disconnect(
+                            reason=f"auto_disconnect:{func.__name__}"
+                        )
 
         return wrapper
 

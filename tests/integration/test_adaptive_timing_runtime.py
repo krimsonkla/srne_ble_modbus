@@ -5,10 +5,11 @@ and override default values appropriately.
 """
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
-import asyncio
+from unittest.mock import Mock
 
-from custom_components.srne_inverter.infrastructure.transport.ble_transport import BLETransport
+from custom_components.srne_inverter.infrastructure.transport.ble_transport import (
+    BLETransport,
+)
 from custom_components.srne_inverter.const import (
     MODBUS_RESPONSE_TIMEOUT,
     BLE_COMMAND_TIMEOUT,
@@ -98,25 +99,20 @@ class TestFreshInstallation:
     async def test_fresh_installation_uses_phase1_defaults(self):
         """Test fresh installation uses conservative Phase 1 defaults."""
         hass = Mock()
-        transport = BLETransport(hass)
+        BLETransport(hass)
 
         # Fresh installation - no learned timeouts set
         # Should use defaults from const.py
 
-        # Verify Phase 1 defaults are in effect
-        # (These are the values before learning begins)
-        assert BLE_COMMAND_TIMEOUT == 1.0  # Conservative Phase 1
-        assert MODBUS_RESPONSE_TIMEOUT == 1.5  # Conservative Phase 1
-        assert BLE_CONNECTION_TIMEOUT == 5.0  # Conservative Phase 1
+        # Verify defaults are in effect (Phase 1 conservative values were
+        # later tuned; assertions track current const.py values).
+        assert BLE_COMMAND_TIMEOUT == 1.5
+        assert MODBUS_RESPONSE_TIMEOUT == 1.5
+        assert BLE_CONNECTION_TIMEOUT == 10.0
 
-    @pytest.mark.asyncio
-    async def test_fresh_installation_no_learned_timeouts_file(self, tmp_path):
-        """Test fresh installation with no storage file."""
+    async def test_fresh_installation_no_learned_timeouts_file(self, hass):
+        """Test fresh installation with no storage file returns None."""
         from homeassistant.helpers.storage import Store
-
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
 
         entry_id = "test_fresh"
         store = Store(hass, 1, f"srne_ble_modbus_{entry_id}_failed_registers")
@@ -311,15 +307,9 @@ class TestEdgeCases:
 class TestCoordinatorIntegration:
     """Test integration with coordinator's timeout management."""
 
-    @pytest.mark.asyncio
-    async def test_coordinator_loads_and_applies_learned_timeouts(self, tmp_path):
+    async def test_coordinator_loads_and_applies_learned_timeouts(self, hass):
         """Test coordinator loads learned timeouts and applies to transport."""
         from homeassistant.helpers.storage import Store
-
-        # Create mock hass
-        hass = Mock()
-        hass.config = Mock()
-        hass.config.path = lambda *args: str(tmp_path / args[0]) if args else str(tmp_path)
 
         entry_id = "test_coord_integration"
 
@@ -336,6 +326,7 @@ class TestCoordinatorIntegration:
 
         # Simulate coordinator loading
         loaded_data = await store.async_load()
+        assert loaded_data is not None
         learned_timeouts = loaded_data.get("learned_timeouts", {})
 
         # Create transport and apply learned timeouts
@@ -419,7 +410,7 @@ class TestRealisticScenarios:
         assert transport._learned_timeouts["modbus_read"] == 1.000
 
 
-class TestTimeoutApplicationThread Safety:
+class TestTimeoutApplicationThreadSafety:
     """Test thread safety of timeout application."""
 
     @pytest.mark.asyncio

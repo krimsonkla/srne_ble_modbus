@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, Mock
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS
-from homeassistant.core import HomeAssistant
 
 from custom_components.srne_inverter.const import DOMAIN
 
@@ -109,14 +108,14 @@ def mock_coordinator(round3_coordinator_data):
     return coordinator
 
 
-@pytest.fixture
-async def hass():
-    """Create a mock HomeAssistant instance."""
-    from homeassistant.core import HomeAssistant
+# The `hass` fixture is provided by pytest_homeassistant_custom_component and
+# yields a real Home Assistant instance. Do not shadow it here.
 
-    hass_instance = Mock(spec=HomeAssistant)
-    hass_instance.data = {}
-    return hass_instance
+
+@pytest.fixture(autouse=True)
+def _auto_enable_custom_integrations(enable_custom_integrations):
+    """Automatically enable custom_components loading for every test."""
+    yield
 
 
 # Pytest configuration

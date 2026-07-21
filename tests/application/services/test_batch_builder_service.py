@@ -12,7 +12,6 @@ Comprehensive test coverage for batch building logic including:
 import pytest
 from custom_components.srne_inverter.application.services.batch_builder_service import (
     BatchBuilderService,
-    RegisterDefinition,
 )
 from custom_components.srne_inverter.domain.entities.register_batch import RegisterBatch
 from custom_components.srne_inverter.domain.value_objects import RegisterAddress
@@ -529,34 +528,36 @@ class TestBatchBuilderIntegration:
 
     @pytest.fixture
     def realistic_config(self):
-        """Realistic SRNE inverter configuration."""
+        """Realistic SRNE inverter configuration.
+
+        Addresses are int (as after config_loader normalization). BatchBuilderService
+        receives already-normalized configs in production.
+        """
         return {
             "device": {
                 "features": {
                     "pv_charging": True,
                     "ac_charging": False,
                 },
-                "feature_ranges": {
-                    "ac_charging": [{"start": "0xE200", "end": "0xE210"}]
-                },
+                "feature_ranges": {"ac_charging": [{"start": 0xE200, "end": 0xE210}]},
             },
             "registers": {
                 # Battery registers (consecutive)
-                "battery_voltage": {"address": "0x0100", "type": "read", "length": 1},
-                "battery_current": {"address": "0x0101", "type": "read", "length": 1},
-                "battery_soc": {"address": "0x0102", "type": "read", "length": 1},
-                "battery_temp": {"address": "0x0103", "type": "read", "length": 1},
+                "battery_voltage": {"address": 0x0100, "type": "read", "length": 1},
+                "battery_current": {"address": 0x0101, "type": "read", "length": 1},
+                "battery_soc": {"address": 0x0102, "type": "read", "length": 1},
+                "battery_temp": {"address": 0x0103, "type": "read", "length": 1},
                 # PV registers (consecutive)
-                "pv_voltage": {"address": "0x0107", "type": "read", "length": 1},
-                "pv_current": {"address": "0x0108", "type": "read", "length": 1},
-                "pv_power": {"address": "0x0109", "type": "read", "length": 2},
+                "pv_voltage": {"address": 0x0107, "type": "read", "length": 1},
+                "pv_current": {"address": 0x0108, "type": "read", "length": 1},
+                "pv_power": {"address": 0x0109, "type": "read", "length": 2},
                 # Output registers (large gap)
-                "output_voltage": {"address": "0x0200", "type": "read", "length": 1},
-                "output_current": {"address": "0x0201", "type": "read", "length": 1},
-                "output_frequency": {"address": "0x0202", "type": "read", "length": 1},
+                "output_voltage": {"address": 0x0200, "type": "read", "length": 1},
+                "output_current": {"address": 0x0201, "type": "read", "length": 1},
+                "output_frequency": {"address": 0x0202, "type": "read", "length": 1},
                 # AC charging registers (disabled feature)
-                "ac_input_voltage": {"address": "0xE200", "type": "read", "length": 1},
-                "ac_input_current": {"address": "0xE201", "type": "read", "length": 1},
+                "ac_input_voltage": {"address": 0xE200, "type": "read", "length": 1},
+                "ac_input_current": {"address": 0xE201, "type": "read", "length": 1},
             },
         }
 

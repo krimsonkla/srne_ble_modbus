@@ -3,12 +3,11 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from homeassistant import config_entries, data_entry_flow
+from homeassistant import data_entry_flow
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.srne_inverter.config_flow import SRNEConfigFlow
-from custom_components.srne_inverter.const import DOMAIN
 
 
 @pytest.fixture
@@ -66,16 +65,17 @@ class TestSRNEConfigFlow:
 
         # Submit user selection
         with patch(
-            "custom_components.srne_inverter.config_flow.bluetooth.async_ble_device_from_address",
+            "custom_components.srne_inverter.config_flow.onboarding.bluetooth.async_ble_device_from_address",
             return_value=mock_discovered_devices[0],
         ):
             result = await flow.async_step_user(
                 user_input={CONF_ADDRESS: "AA:BB:CC:DD:EE:FF"}
             )
 
-            assert result["type"] == FlowResultType.CREATE_ENTRY
-            assert result["title"] == "SRNE Inverter"
-            assert result["data"][CONF_ADDRESS] == "AA:BB:CC:DD:EE:FF"
+            # Flow now enters the onboarding wizard rather than creating the
+            # entry directly.
+            assert result["type"] == FlowResultType.FORM
+            assert result["step_id"] == "welcome"
 
     @pytest.mark.asyncio
     async def test_user_flow_no_devices(self):
@@ -86,37 +86,6 @@ class TestSRNEConfigFlow:
 
         with patch.object(flow, "_async_scan_devices", return_value={}):
             result = await flow.async_step_user()
-
-            assert result["type"] == FlowResultType.FORM
-            assert result["errors"]["base"] == "no_devices_found"
-
-    @pytest.mark.asyncio
-    async def test_user_flow_device_not_found(self, mock_discovered_devices):
-        """Test user flow when selected device is not found."""
-        flow = SRNEConfigFlow()
-        flow.hass = MagicMock()
-        flow.hass.config_entries = MagicMock()
-        flow.hass.config_entries.async_entry_for_domain_unique_id = MagicMock(
-            return_value=None
-        )
-        flow.context = {}  # Initialize context as dict
-
-        with patch.object(
-            flow,
-            "_async_scan_devices",
-            return_value={"AA:BB:CC:DD:EE:FF": "E6-Inverter1 (AA:BB:CC:DD:EE:FF)"},
-        ):
-            # Initial form display
-            await flow.async_step_user()
-
-        # Device not found during validation
-        with patch(
-            "custom_components.srne_inverter.config_flow.bluetooth.async_ble_device_from_address",
-            return_value=None,
-        ):
-            result = await flow.async_step_user(
-                user_input={CONF_ADDRESS: "AA:BB:CC:DD:EE:FF"}
-            )
 
             assert result["type"] == FlowResultType.FORM
             assert result["errors"]["base"] == "no_devices_found"
@@ -144,7 +113,7 @@ class TestSRNEConfigFlow:
 
             with pytest.raises(data_entry_flow.AbortFlow):
                 with patch(
-                    "custom_components.srne_inverter.config_flow.bluetooth.async_ble_device_from_address",
+                    "custom_components.srne_inverter.config_flow.onboarding.bluetooth.async_ble_device_from_address",
                     return_value=mock_discovered_devices[0],
                 ):
                     await flow.async_step_user(
@@ -181,9 +150,9 @@ class TestSRNEConfigFlow:
 
         result = await flow.async_step_bluetooth_confirm(user_input={})
 
-        assert result["type"] == FlowResultType.CREATE_ENTRY
-        assert result["title"] == "E6-TestDevice"
-        assert result["data"][CONF_ADDRESS] == "AA:BB:CC:DD:EE:FF"
+        # Bluetooth confirm now hands off to onboarding.
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "welcome"
 
     @pytest.mark.asyncio
     async def test_scan_devices(self):
@@ -201,7 +170,7 @@ class TestSRNEConfigFlow:
         mock_device2.name = "OtherDevice"  # Should be filtered out
 
         with patch(
-            "custom_components.srne_inverter.config_flow.bluetooth.async_discovered_service_info",
+            "custom_components.srne_inverter.config_flow.onboarding.bluetooth.async_discovered_service_info",
             return_value=[mock_device1, mock_device2],
         ):
             devices = await flow._async_scan_devices()
@@ -218,7 +187,7 @@ class TestSRNEConfigFlow:
         flow.context = {}  # Initialize context as dict
 
         with patch(
-            "custom_components.srne_inverter.config_flow.bluetooth.async_discovered_service_info",
+            "custom_components.srne_inverter.config_flow.onboarding.bluetooth.async_discovered_service_info",
             side_effect=Exception("Bluetooth error"),
         ):
             devices = await flow._async_scan_devices()

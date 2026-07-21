@@ -38,7 +38,7 @@ BLE_NOTIFY_UUID = "53300005-0023-4BD4-BBD5-A6920E4C5653"
 # BLE Communication Timing
 BLE_COMMAND_TIMEOUT = 1.5  # Timeout for BLE command operations
 BLE_NOTIFY_SUBSCRIBE_TIMEOUT = 1.0  # Timeout for notification subscription
-BLE_CONNECTION_TIMEOUT = 5.0  # Overall connection operation timeout
+BLE_CONNECTION_TIMEOUT = 10.0  # Overall connection operation timeout
 BLE_DISCONNECT_TIMEOUT = 0.5  # Timeout for disconnect operations
 BLE_NOTIFY_RETRY_DELAY = 0.25  # Delay between notification subscription retries
 BLE_DISCOVERY_TIMEOUT = 20.0  # Wait time for device discovery on HA restart
@@ -58,6 +58,29 @@ WRITE_RETRY_DELAY_SEC = 2.0  # Wait between attempts after a timeout
 # Command Delays
 COMMAND_DELAY_WRITE = 0.01  # Delay after write operations in preset manager
 WRITE_VERIFY_DELAY_UI = 0.15  # Delay before read-verify in UI number entity
+
+# Inter-batch pacing
+# The SRNE BLE module periodically returns ATT 0x0e ("Unlikely Error") when
+# writes arrive faster than its firmware can service them. A short gap between
+# consecutive batch reads gives the module time to settle and measurably reduces
+# the 0x0e rate. Set to 0.0 to disable pacing entirely; raise toward 0.1 if drops
+# persist. Cost at the default: ~21 batches * 0.05s = ~1.05s added per full refresh.
+INTER_BATCH_DELAY = 0.10  # Delay between batch reads in a refresh cycle
+
+# Write request vs. write command
+# When True, each command is sent as an ATT Write Request (response=True), which
+# waits for the peripheral's ACK and can surface a device-side 0x0e on the write
+# itself. When False, commands are sent as ATT Write Commands (response=False):
+# the device cannot return 0x0e on the write because no ATT response is exchanged,
+# so the failure surface shifts to the follow-up read instead of raising mid-write.
+# The real Modbus reply still arrives via NOTIFY either way. Flip to False to test
+# whether write-without-response reduces dropouts on a flaky module.
+BLE_WRITE_WITH_RESPONSE = True  # Use ATT Write Request (True) vs Write Command (False)
+
+# Post-write settle delay used ONLY when BLE_WRITE_WITH_RESPONSE is False. A Write
+# Command returns immediately, so without a small delay the follow-up read can race
+# ahead of the device storing its result code. Ignored when writing with response.
+BLE_WRITE_PROCESSING_DELAY = 0.04  # Settle time after a response=False write
 
 # Circuit Breaker Configuration
 MAX_CONSECUTIVE_TIMEOUTS = 5  # Force reconnect after N consecutive timeouts

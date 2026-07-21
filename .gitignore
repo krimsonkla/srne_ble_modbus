@@ -12,7 +12,13 @@ steampipe
 devenv.*
 /node_modules/
 .DS_Store
-/.github/
+/.github/*
+!/.github/workflows/
 /.devenv/
 /.claude-flow/
 /.claude/
+.env.devenv
+.codacy.yml
+.cache/dev
+.codacy/
+.claude

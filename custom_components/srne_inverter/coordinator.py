@@ -27,11 +27,9 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .domain.helpers.address_helpers import format_address
-from .domain.helpers.transformations import convert_to_signed_int16
 from .const import (
     DEFAULT_SLAVE_ID,
     DOMAIN,
-    TIMING_SAMPLE_SIZE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -338,7 +336,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.info(
                         "Excluding %d disabled register addresses: %s",
                         len(disabled_addresses),
-                        [f"0x{addr:04X}" for addr in sorted(disabled_addresses)[:10]]
+                        [f"0x{addr:04X}" for addr in sorted(disabled_addresses)[:10]],
                     )
 
             # Combine failed and disabled registers for exclusion
@@ -721,7 +719,7 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Transport cleanup via injected dependency
         try:
             if self._transport and self._transport.is_connected:
-                await self._transport.disconnect()
+                await self._transport.disconnect(reason="coordinator_shutdown")
                 _LOGGER.info("Disconnected from BLE device")
         except Exception as err:
             _LOGGER.error("Unexpected error during disconnect: %s", err)

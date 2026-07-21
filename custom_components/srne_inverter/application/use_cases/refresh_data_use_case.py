@@ -12,6 +12,7 @@ Application Layer Extraction
 Extracted DTOs
 """
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
@@ -23,7 +24,7 @@ from ...domain.value_objects.exception_code import ExceptionCode
 from ...domain.entities.register_batch import RegisterBatch
 from ...domain.helpers.transformations import process_register_value
 from ...infrastructure.decorators import require_connection
-from ...const import MODBUS_RESPONSE_TIMEOUT
+from ...const import MODBUS_RESPONSE_TIMEOUT, INTER_BATCH_DELAY
 from .refresh_data_result import RefreshDataResult
 
 _LOGGER = logging.getLogger(__name__)
@@ -125,6 +126,11 @@ class RefreshDataUseCase:
         self._start_time = time.time()
         self._failed_reads = 0
         self._register_definitions = register_definitions
+        _LOGGER.debug(
+            "[SRNE_TRACE] refresh cycle START addr=%s batches=%d",
+            device_address,
+            len(register_batches),
+        )
 
         # Build address-to-name mapping (cached - 95% hit rate)
         batch_key = tuple((int(b.start_address), b.count) for b in register_batches)
@@ -159,6 +165,12 @@ class RefreshDataUseCase:
             data = {}
 
             for i, batch in enumerate(register_batches, 1):
+                # Pace consecutive batches: the SRNE module returns 0x0e when
+                # written too fast. Skip the delay before the first batch so the
+                # cycle is not slowed unnecessarily. Disabled when delay is 0.0.
+                if i > 1 and INTER_BATCH_DELAY > 0:
+                    await asyncio.sleep(INTER_BATCH_DELAY)
+
                 # CRITICAL: Check connection before each batch
                 # If disconnected, stop immediately instead of processing remaining batches
                 if not self._transport.is_connected:
@@ -368,6 +380,12 @@ class RefreshDataUseCase:
                     [f"0x{addr:04X}" for addr in sorted(self._failed_registers)],
                 )
 
+            _LOGGER.debug(
+                "[SRNE_TRACE] refresh cycle END OK dt=%.2fs batches=%d failed_reads=%d",
+                duration,
+                len(register_batches),
+                self._failed_reads,
+            )
             return RefreshDataResult(
                 data=data,
                 success=True,
@@ -379,6 +397,12 @@ class RefreshDataUseCase:
         except Exception as err:
             _LOGGER.error(
                 "Unexpected error during data refresh: %s", err, exc_info=True
+            )
+            _LOGGER.debug(
+                "[SRNE_TRACE] refresh cycle END FAIL dt=%.2fs err_type=%s err=%s",
+                time.time() - self._start_time,
+                type(err).__name__,
+                err,
             )
             return RefreshDataResult(
                 data={},
