@@ -1,10 +1,13 @@
 # Contributing to SRNE BLE Modbus Integration
 
-Thank you for your interest in contributing to this project. This document outlines our contribution guidelines and standards.
+Thank you for your interest in contributing to this project. This document
+outlines our contribution guidelines and standards.
 
 ## IMPORTANT: Read the Disclaimer First
 
-Before contributing, you **MUST** read and understand the [DISCLAIMER.md](DISCLAIMER.md) file. By contributing, you acknowledge:
+Before contributing, you **MUST** read and understand the
+[DISCLAIMER.md](DISCLAIMER.md) file. By contributing, you acknowledge:
+
 - The risks involved in this software
 - Your responsibility as a contributor
 - The liability limitations
@@ -23,6 +26,7 @@ Before contributing, you **MUST** read and understand the [DISCLAIMER.md](DISCLA
 ### Critical Safety Requirements
 
 All contributions must:
+
 1. **Never compromise safety features**
 2. **Include comprehensive error handling**
 3. **Validate all user inputs**
@@ -32,6 +36,7 @@ All contributions must:
 ### Safety Review Checklist
 
 Before submitting code that controls hardware:
+
 - [ ] Includes input validation
 - [ ] Handles communication failures gracefully
 - [ ] Includes timeout mechanisms
@@ -58,11 +63,10 @@ Before submitting code that controls hardware:
 git clone https://github.com/krimsonkla/srne_ble_modbus.git
 cd srne_ble_modbus
 
-# Install development dependencies
-pip install -r requirements-dev.txt
-
-# Install pre-commit hooks
-pre-commit install
+# Install runtime and test dependencies
+# (install runtime first — the test plugin pins an exact Home Assistant version)
+pip install -r requirements.txt
+pip install -r tests/requirements.txt
 
 # Run tests
 pytest
@@ -134,7 +138,8 @@ class ExampleClass:
 1. **Type Hints**: All functions must include type hints
 2. **Docstrings**: All public functions/classes need docstrings
 3. **Error Handling**: Explicit error handling with informative messages
-4. **Logging**: Use appropriate log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+4. **Logging**: Use appropriate log levels (DEBUG, INFO, WARNING, ERROR,
+   CRITICAL)
 5. **Constants**: Use UPPER_CASE for constants
 6. **Private Methods**: Prefix with underscore `_method_name`
 
@@ -275,6 +280,7 @@ pytest tests/test_coordinator.py
 ### User Documentation
 
 When adding features, update:
+
 - README.md (if user-facing)
 - Configuration examples in `docs/`
 - Safety warnings in DISCLAIMER.md (if needed)
@@ -295,22 +301,27 @@ When adding features, update:
 
 ```markdown
 ## Description
+
 Brief description of changes
 
 ## Type of Change
+
 - [ ] Bug fix (non-breaking change which fixes an issue)
 - [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] Breaking change (fix or feature that would cause existing functionality to
+      not work as expected)
 - [ ] Documentation update
 - [ ] Safety improvement
 
 ## Safety Impact
+
 - [ ] No hardware interaction
 - [ ] Read-only hardware access
 - [ ] Modifies hardware settings (REQUIRES EXTRA REVIEW)
 - [ ] Changes safety-critical code (REQUIRES MAINTAINER APPROVAL)
 
 ## Testing
+
 - [ ] Unit tests added/updated
 - [ ] Integration tests added/updated
 - [ ] Manual testing completed in safe environment
@@ -318,12 +329,14 @@ Brief description of changes
 - [ ] All tests pass
 
 ## Documentation
+
 - [ ] Code comments added/updated
 - [ ] Docstrings added/updated
 - [ ] User documentation updated
 - [ ] Safety warnings added (if needed)
 
 ## Checklist
+
 - [ ] Code follows project style guidelines
 - [ ] Self-review completed
 - [ ] No sensitive data in commit
@@ -342,6 +355,7 @@ Brief description of changes
 ### Review Criteria
 
 Reviewers will check:
+
 - Code quality and style
 - Safety considerations
 - Error handling
@@ -375,6 +389,7 @@ safety: add timeout to hardware write operations
 ```
 
 Types:
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
@@ -418,6 +433,7 @@ Testing with real hardware is **DANGEROUS**. Follow these rules:
 ### Hardware Test Environment
 
 Required safety measures:
+
 - Fire-resistant surface
 - Adequate ventilation
 - Temperature monitoring
@@ -445,6 +461,7 @@ def mock_ble_device():
 ### Bug Reports
 
 Include:
+
 - Home Assistant version
 - Integration version
 - Hardware model and firmware version
@@ -458,6 +475,7 @@ Include:
 **DO NOT** open public issues for security vulnerabilities.
 
 Contact maintainers privately:
+
 - Email project maintainers
 - Use GitHub Security Advisory
 - Allow reasonable disclosure time
@@ -465,6 +483,7 @@ Contact maintainers privately:
 ### Safety Issues
 
 Safety issues get **HIGHEST PRIORITY**:
+
 1. Report immediately
 2. Stop using affected features
 3. Provide detailed description
@@ -474,6 +493,7 @@ Safety issues get **HIGHEST PRIORITY**:
 ## Feature Requests
 
 Before requesting features:
+
 1. Check existing issues
 2. Consider safety implications
 3. Provide detailed use case
@@ -482,11 +502,13 @@ Before requesting features:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License. See [LICENSE](LICENSE) for details.
+By contributing, you agree that your contributions will be licensed under the
+MIT License. See [LICENSE](LICENSE) for details.
 
 ## Attribution
 
 Contributors will be acknowledged in:
+
 - GitHub contributors list
 - Release notes
 - CHANGELOG.md

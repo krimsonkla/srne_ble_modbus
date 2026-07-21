@@ -6,9 +6,9 @@ Technical architecture documentation for developers and contributors.
 
 **USE AT YOUR OWN RISK**
 
-This software interfaces directly with your SRNE inverter via BLE.
-Improper configuration or use may result in equipment damage or malfunction.
-The authors assume NO LIABILITY for any damage or loss.
+This software interfaces directly with your SRNE inverter via BLE. Improper
+configuration or use may result in equipment damage or malfunction. The authors
+assume NO LIABILITY for any damage or loss.
 
 ---
 
@@ -16,40 +16,61 @@ The authors assume NO LIABILITY for any damage or loss.
 
 ### High-Level Overview
 
+```mermaid
+flowchart TB
+    subgraph HA["Home Assistant"]
+        subgraph INT["SRNE BLE Modbus Integration"]
+            CF["Config Flow<br/><i>setup & options</i>"]
+            CO["Coordinator<br/><i>polling cycle</i>"]
+            EN["Entities<br/><i>sensor / number / select / switch</i>"]
+            BM["BLE Manager<br/><i>connect, frame, retry</i>"]
+
+            CF --> BM
+            CO --> BM
+            EN --> CO
+        end
+    end
+
+    BM --> BLEAK["bleak + bleak-retry-connector"]
+    BLEAK --> STACK["Host Bluetooth stack"]
+    STACK -.->|"BLE GATT<br/>Modbus RTU"| INV["SRNE Inverter"]
+
+    classDef box fill:#1f6feb22,stroke:#1f6feb,stroke-width:1px
+    classDef dev fill:#2da44e22,stroke:#2da44e,stroke-width:1px
+    class CF,CO,EN,BM,BLEAK,STACK box
+    class INV dev
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Home Assistant                          │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │         SRNE BLE Modbus Integration                 │   │
-│  │                                                      │   │
-│  │  ┌────────────┐  ┌──────────────┐  ┌─────────────┐│   │
-│  │  │            │  │              │  │             ││   │
-│  │  │ Config Flow│  │ Coordinator  │  │  Entities   ││   │
-│  │  │            │  │              │  │             ││   │
-│  │  └─────┬──────┘  └──────┬───────┘  └──────┬──────┘│   │
-│  │        │                │                  │       │   │
-│  │        └────────────────┴──────────────────┘       │   │
-│  │                         │                          │   │
-│  │                 ┌───────▼───────┐                  │   │
-│  │                 │  BLE Manager  │                  │   │
-│  │                 └───────┬───────┘                  │   │
-│  └─────────────────────────┼─────────────────────────┘   │
-└────────────────────────────┼───────────────────────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  Bleak (BLE)    │
-                    │    Library      │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │ Bluetooth Stack │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  SRNE Inverter  │
-                    │   (BLE Device)  │
-                    └─────────────────┘
+
+### Layered Design
+
+The integration follows domain-driven design. Dependencies point inward only —
+the domain layer knows nothing about Home Assistant or BLE, which keeps it
+directly unit-testable.
+
+```mermaid
+flowchart TB
+    P["<b>Presentation</b><br/>HA entity platforms, config flow, DI container"]
+    A["<b>Application</b><br/>use cases, batching, transactions, timeout learning"]
+    D["<b>Domain</b><br/>registers, batches, transactions, exceptions — pure logic"]
+    I["<b>Infrastructure</b><br/>BLE transport, Modbus codec, HA adapters"]
+
+    P --> A
+    A --> D
+    I --> D
+    P -.->|"wired via DI container"| I
+
+    classDef pres fill:#8250df22,stroke:#8250df
+    classDef app fill:#1f6feb22,stroke:#1f6feb
+    classDef dom fill:#2da44e22,stroke:#2da44e
+    classDef inf fill:#bf872022,stroke:#bf8720
+    class P pres
+    class A app
+    class D dom
+    class I inf
 ```
+
+Each layer has a matching test directory — see
+[tests/README.md](../tests/README.md).
 
 ---
 
@@ -67,6 +88,7 @@ Handles integration setup and configuration:
 - **Options Flow**: Allows reconfiguration after setup
 
 **Key Features**:
+
 - Automatic BLE device scanning
 - Password configuration for protected registers
 - YAML-driven schema generation for writable registers
@@ -95,6 +117,7 @@ class SRNEInverterCoordinator(DataUpdateCoordinator):
 ```
 
 **Responsibilities**:
+
 - Periodic data polling (30-second default)
 - BLE connection management
 - Register read/write operations
@@ -102,6 +125,7 @@ class SRNEInverterCoordinator(DataUpdateCoordinator):
 - Data caching and state management
 
 **Update Cycle**:
+
 1. Connect to BLE device
 2. Read configured registers
 3. Parse Modbus responses
@@ -124,6 +148,7 @@ class BLEManager:
 ```
 
 **Key Features**:
+
 - GATT service/characteristic management
 - Command spacing enforcement (10-second minimum)
 - Notification handling
@@ -131,6 +156,7 @@ class BLEManager:
 - Automatic reconnection on disconnect
 
 **Communication Protocol**:
+
 1. Write Modbus command to write characteristic (0x53300001)
 2. Receive acknowledgment ("----...")
 3. Wait for data on notify characteristic (0x53300005)
@@ -156,6 +182,7 @@ class RegisterBatcher:
 ```
 
 **Features**:
+
 - Intelligent register batching
 - Feature flag filtering for model-specific registers
 - Failed register caching
@@ -163,6 +190,7 @@ class RegisterBatcher:
 - Performance optimization
 
 **Feature Flags**:
+
 - `grid_tie`: Grid-connected functionality (0xE400-0xE43F)
 - `diesel_mode`: Diesel generator mode
 - `three_phase`: Three-phase models
@@ -172,6 +200,7 @@ class RegisterBatcher:
 ### 5. Entity Platform
 
 **Files**:
+
 - `sensor.py` - Read-only sensors
 - `select.py` - Selection controls
 - `number.py` - Numeric controls
@@ -181,6 +210,7 @@ class RegisterBatcher:
 **Entity Types**:
 
 **Sensors** (Read-Only):
+
 ```python
 class SRNEBatterySOCSensor(SensorEntity):
     """Battery State of Charge sensor."""
@@ -190,6 +220,7 @@ class SRNEBatterySOCSensor(SensorEntity):
 ```
 
 **Select Entities** (Writable):
+
 ```python
 class SRNEOutputPrioritySelect(SelectEntity):
     """Output priority mode selection."""
@@ -197,6 +228,7 @@ class SRNEOutputPrioritySelect(SelectEntity):
 ```
 
 **Number Entities** (Writable):
+
 ```python
 class SRNEChargeCurrentNumber(NumberEntity):
     """Charge current limit control."""
@@ -300,18 +332,21 @@ class SRNEChargeCurrentNumber(NumberEntity):
 ### Frame Structure
 
 **Read Request**:
+
 ```
 [Device ID][Function Code][Start Address Hi][Start Address Lo]
 [Register Count Hi][Register Count Lo][CRC Lo][CRC Hi]
 ```
 
 **Write Request**:
+
 ```
 [Device ID][Function Code][Register Address Hi][Register Address Lo]
 [Value Hi][Value Lo][CRC Lo][CRC Hi]
 ```
 
 **Response**:
+
 ```
 [8 bytes of zeros][Device ID][Function Code][Byte Count]
 [Data...][CRC Lo][CRC Hi]
@@ -464,6 +499,7 @@ except ModbusException as err:
 ### Password Protection
 
 Protected register ranges:
+
 - **0xE000-0xE0FF**: Battery parameters (password: 4321)
 - **0xE200-0xE2FF**: Grid parameters (password: 0000)
 - **0xE300-0xE3FF**: Software settings (password: 111111)
@@ -488,6 +524,7 @@ async def _authenticate_with_password(self, password=None):
 ### Input Validation
 
 All writable values validated before transmission:
+
 - Range checking (min/max)
 - Type validation
 - Scale application
@@ -500,6 +537,7 @@ All writable values validated before transmission:
 ### Adding New Registers
 
 1. Add to `entities_pilot.yaml`:
+
 ```yaml
 new_register:
   address: 0xEXXX
@@ -549,6 +587,7 @@ async def async_setup_entry(hass, entry):
 ### Unit Tests
 
 Located in `tests/`:
+
 - `test_coordinator.py` - Coordinator logic
 - `test_ble_manager.py` - BLE communication
 - `test_register_batching.py` - Register management
@@ -557,18 +596,24 @@ Located in `tests/`:
 ### Integration Tests
 
 Test complete workflows:
+
 - Device discovery
 - Initial setup
 - Data updates
 - Register writes
 - Error handling
 
-### Manual Testing
+### Running the tests
 
-Use BLE test suite:
 ```bash
-python tests/ble_test_suite.py --device E6XXXXXXXXXXXX --test-all
+pip install -r requirements.txt
+pip install -r tests/requirements.txt
+pytest
 ```
+
+The suite runs against a mocked BLE device, so no hardware is required. See
+[tests/README.md](../tests/README.md) for layout and conventions, and
+[Troubleshooting](TROUBLESHOOTING.md) for verifying against real hardware.
 
 ---
 
@@ -587,20 +632,17 @@ logger:
 
 ### Common Issues
 
-**BLE Disconnections**: Increase command spacing, check interference
-**Slow Updates**: Normal for BLE protocol (10s minimum spacing)
-**Permission Errors**: Configure password in integration settings
-**Missing Entities**: Check feature flags, review register support
+**BLE Disconnections**: Increase command spacing, check interference **Slow
+Updates**: Normal for BLE protocol (10s minimum spacing) **Permission Errors**:
+Configure password in integration settings **Missing Entities**: Check feature
+flags, review register support
 
 ---
 
 ## References
 
-- [SRNE Protocol Specification](BLE_PROTOCOL.md)
-- [Register Mapping](REGISTER_MAPPING.md)
-- [Services Documentation](services.md)
+- [BLE Protocol](BLE_PROTOCOL.md) - Transport framing and register semantics
+- [SRNE Protocol Specification v1.96](../resources/SRNE_Energy_Storage_Inverter_Protocol_v1.96.md) -
+  Vendor register reference
+- [Test Suite](../tests/README.md) - Tests mirror the layering described here
 - [Modbus RTU Standard](https://modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf)
-
----
-
-**Last Updated**: 2026-02-05

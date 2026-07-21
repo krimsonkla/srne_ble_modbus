@@ -12,8 +12,6 @@ on:
   pull_request:
     branches:
       - main
-      - jmr/SRNE-002-ble-reliability-and-observability
-      - jmr/SRNE-002-test-fixes
   push:
     branches:
       - main

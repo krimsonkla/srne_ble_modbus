@@ -6,9 +6,9 @@ Complete troubleshooting guide for common issues and their solutions.
 
 **USE AT YOUR OWN RISK**
 
-This software interfaces directly with your SRNE inverter via BLE.
-Improper configuration or use may result in equipment damage.
-The authors assume NO LIABILITY for any damage or loss.
+This software interfaces directly with your SRNE inverter via BLE. Improper
+configuration or use may result in equipment damage. The authors assume NO
+LIABILITY for any damage or loss.
 
 ---
 
@@ -19,7 +19,8 @@ The authors assume NO LIABILITY for any damage or loss.
 Use this checklist to quickly identify your issue category:
 
 - [ ] **Cannot find integration** → [Installation Issues](#installation-issues)
-- [ ] **Cannot discover device** → [BLE Connection Issues](#ble-connection-issues)
+- [ ] **Cannot discover device** →
+      [BLE Connection Issues](#ble-connection-issues)
 - [ ] **Setup fails** → [Configuration Issues](#configuration-issues)
 - [ ] **Entities unavailable** → [Entity Issues](#entity-issues)
 - [ ] **Cannot write registers** → [Permission Issues](#permission-issues)
@@ -33,6 +34,7 @@ Use this checklist to quickly identify your issue category:
 ### Integration Not Appearing in HACS
 
 **Symptoms**:
+
 - Cannot find "SRNE BLE Modbus" in HACS
 - Search returns no results
 
@@ -63,13 +65,14 @@ Use this checklist to quickly identify your issue category:
 ### Integration Not Loading
 
 **Symptoms**:
+
 - Integration installed but not available in UI
 - Error in logs: "Setup failed"
 
 **Solutions**:
 
 1. **Check Home Assistant version**:
-   - Requires HA 2024.11.0 or later
+   - Requires HA 2024.12.0 or later
    - Update Home Assistant if needed
 
 2. **Verify installation path**:
@@ -98,6 +101,7 @@ Use this checklist to quickly identify your issue category:
 ### Cannot Discover Devices
 
 **Symptoms**:
+
 - Integration setup shows "No devices found"
 - Scan completes but list is empty
 
@@ -140,6 +144,7 @@ Use this checklist to quickly identify your issue category:
 ### Device Discovered But Connection Fails
 
 **Symptoms**:
+
 - Device appears in scan
 - Setup fails with "Connection timeout"
 
@@ -179,6 +184,7 @@ Use this checklist to quickly identify your issue category:
 ### Setup Wizard Fails
 
 **Symptoms**:
+
 - Setup completes but entities not created
 - Error: "Failed to set up integration"
 
@@ -212,6 +218,7 @@ Use this checklist to quickly identify your issue category:
 ### Password Configuration Not Working
 
 **Symptoms**:
+
 - Entered password but writes still fail
 - Error: "Permission denied (0x0B)"
 
@@ -245,6 +252,7 @@ Use this checklist to quickly identify your issue category:
 ### Entities Show "Unavailable"
 
 **Symptoms**:
+
 - Some or all entities show "unavailable"
 - Entity was working previously
 
@@ -276,6 +284,7 @@ Use this checklist to quickly identify your issue category:
 ### Missing Expected Entities
 
 **Symptoms**:
+
 - Some documented entities not appearing
 - Feature seems unsupported
 
@@ -297,7 +306,7 @@ Use this checklist to quickly identify your issue category:
      ```yaml
      device:
        features:
-         grid_tie: true  # If you have grid-tie model
+         grid_tie: true # If you have grid-tie model
      ```
 
 4. **Entity hidden intentionally**:
@@ -308,6 +317,7 @@ Use this checklist to quickly identify your issue category:
 ### Entity Values Incorrect
 
 **Symptoms**:
+
 - Entity shows wrong value
 - Value doesn't match inverter LCD
 
@@ -344,6 +354,7 @@ Use this checklist to quickly identify your issue category:
 ### Cannot Write to Registers
 
 **Symptoms**:
+
 - Write operations fail
 - Error: "Permission denied (0x0B)"
 
@@ -365,15 +376,16 @@ Use this checklist to quickly identify your issue category:
    - Integration auto-authenticates
 
 4. **Protected range reference**:
-   | Range | Password | Description |
-   |-------|----------|-------------|
-   | 0xE000-0xE0FF | 4321 | Battery settings |
-   | 0xE200-0xE2FF | 0000 | Grid settings |
-   | 0xE300-0xE3FF | 111111 | Software settings |
+   | Range         | Password | Description       |
+   | ------------- | -------- | ----------------- |
+   | 0xE000-0xE0FF | 4321     | Battery settings  |
+   | 0xE200-0xE2FF | 0000     | Grid settings     |
+   | 0xE300-0xE3FF | 111111   | Software settings |
 
 ### Write Succeeds But Value Not Changed
 
 **Symptoms**:
+
 - No error message
 - Value remains unchanged after write
 
@@ -406,6 +418,7 @@ Use this checklist to quickly identify your issue category:
 ### Slow Data Updates
 
 **Symptoms**:
+
 - Entity updates take > 30 seconds
 - Long delays between value changes
 
@@ -436,6 +449,7 @@ Use this checklist to quickly identify your issue category:
 ### Initial Setup Takes Too Long
 
 **Symptoms**:
+
 - Setup wizard runs for > 5 minutes
 - Progress appears stuck
 
@@ -468,6 +482,7 @@ Use this checklist to quickly identify your issue category:
 ### Frequent Disconnections
 
 **Symptoms**:
+
 - Connection drops every few minutes
 - Constant "unavailable" → "available" cycles
 
@@ -502,6 +517,7 @@ Use this checklist to quickly identify your issue category:
 ### Connection Loss After Inverter Restart
 
 **Symptoms**:
+
 - Connection fails after inverter reboot
 - Manual reconnection required
 
@@ -535,44 +551,56 @@ Use this checklist to quickly identify your issue category:
 ### Common Error Codes
 
 **Modbus Exception 0x01: Illegal Function**
+
 ```
 Error: Modbus exception 0x01 (Illegal Function)
 ```
+
 - **Cause**: Unsupported function code
 - **Solution**: Update integration, report issue
 
 **Modbus Exception 0x02: Illegal Data Address**
+
 ```
 Error: Modbus exception 0x02 (Illegal Data Address)
 ```
+
 - **Cause**: Register not supported by inverter model
 - **Solution**: Normal, register cached as unsupported
 
 **Modbus Exception 0x03: Illegal Data Value**
+
 ```
 Error: Modbus exception 0x03 (Illegal Data Value)
 ```
+
 - **Cause**: Value out of acceptable range
 - **Solution**: Check min/max limits, adjust value
 
 **Modbus Exception 0x0B: Permission Denied**
+
 ```
 Error: Modbus exception 0x0B (Permission Denied)
 ```
+
 - **Cause**: Password required for protected register
 - **Solution**: Configure password in settings
 
 **BLE Error: Connection Timeout**
+
 ```
 Error: Connection timeout after 10 seconds
 ```
+
 - **Cause**: BLE device not responding
 - **Solution**: Check device powered on, within range
 
 **BLE Error: Device Not Found**
+
 ```
 Error: Device E6XXXX not found
 ```
+
 - **Cause**: Device out of range or powered off
 - **Solution**: Move closer, verify device on
 
@@ -595,21 +623,25 @@ logger:
 ### Useful Log Filters
 
 **Connection issues**:
+
 ```bash
 grep "BLE" home-assistant.log
 ```
 
 **Register read failures**:
+
 ```bash
 grep "Modbus exception" home-assistant.log
 ```
 
 **Write operations**:
+
 ```bash
 grep "write_register" home-assistant.log
 ```
 
 **Authentication**:
+
 ```bash
 grep "password" home-assistant.log
 ```
@@ -633,14 +665,13 @@ btmon -w ble_capture.pcap
 wireshark ble_capture.pcap
 ```
 
-### Manual BLE Testing
+### Verifying against real hardware
 
-Use BLE test suite for direct testing:
-
-```bash
-cd /config/custom_components/srne_inverter/tests
-python ble_test_suite.py --device E6XXXXXXXXXXXX --test-all
-```
+The automated suite uses a mocked BLE device. To exercise a physical inverter,
+install the integration in a development Home Assistant instance, enable debug
+logging (above), and reload the integration — the trace log records every Modbus
+frame sent and received. See [BLE_PROTOCOL.md](BLE_PROTOCOL.md) for interpreting
+those frames.
 
 ### Database Issues
 
@@ -675,29 +706,35 @@ Include in GitHub issue:
 
 ```markdown
 ## System Information
-- HA Version: 2024.x.x
-- Integration Version: 1.x.x
+
+- HA Version: 2025.1.4
+- Integration Version: 0.5.0
 - Inverter Model: SR-HF2430Sxx-xxx
 
 ## Problem Description
+
 [Clear description of issue]
 
 ## Steps to Reproduce
+
 1. [First step]
 2. [Second step]
 3. [Issue occurs]
 
 ## Expected Behavior
+
 [What should happen]
 
 ## Actual Behavior
+
 [What actually happens]
 
 ## Logs
 ```
-[Paste relevant logs here]
-```
 
+[Paste relevant logs here]
+
+```
 ## Attempted Solutions
 [What you've already tried]
 ```
@@ -773,6 +810,5 @@ Address issues early before they escalate.
 
 ---
 
-**Last Updated**: 2026-02-05
-
-**Need more help?** Check [Documentation Index](INDEX.md) or create a [GitHub Issue](https://github.com/krimsonkla/srne_ble_modbus/issues).
+**Need more help?** Check [Documentation Index](INDEX.md) or create a
+[GitHub Issue](https://github.com/krimsonkla/srne_ble_modbus/issues).

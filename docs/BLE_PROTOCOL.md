@@ -1,19 +1,22 @@
 # BLE Protocol Specification - SRNE Inverters
 
-Technical specification for Bluetooth Low Energy communication with SRNE HF Series inverters.
+Technical specification for Bluetooth Low Energy communication with SRNE HF
+Series inverters.
 
 ## ⚠️ DISCLAIMER
 
 **USE AT YOUR OWN RISK**
 
-This software interfaces directly with your SRNE inverter via BLE. Improper use may result in equipment damage.
-The authors assume NO LIABILITY for any damage or loss.
+This software interfaces directly with your SRNE inverter via BLE. Improper use
+may result in equipment damage. The authors assume NO LIABILITY for any damage
+or loss.
 
 ---
 
 ## Overview
 
-SRNE HF Series inverters implement Modbus RTU protocol over Bluetooth Low Energy (BLE) using GATT characteristics.
+SRNE HF Series inverters implement Modbus RTU protocol over Bluetooth Low Energy
+(BLE) using GATT characteristics.
 
 ### Protocol Stack
 
@@ -40,22 +43,24 @@ SRNE HF Series inverters implement Modbus RTU protocol over Bluetooth Low Energy
 
 ### Characteristics
 
-| UUID | Type | Properties | Description |
-|------|------|------------|-------------|
-| 0x53300001 | Command | Write | Send Modbus commands |
-| 0x53300002 | Unknown | - | Reserved |
-| 0x53300003 | Unknown | - | Reserved |
-| 0x53300004 | Unknown | - | Reserved |
-| 0x53300005 | Response | Notify | Receive Modbus responses |
+| UUID       | Type     | Properties | Description              |
+| ---------- | -------- | ---------- | ------------------------ |
+| 0x53300001 | Command  | Write      | Send Modbus commands     |
+| 0x53300002 | Unknown  | -          | Reserved                 |
+| 0x53300003 | Unknown  | -          | Reserved                 |
+| 0x53300004 | Unknown  | -          | Reserved                 |
+| 0x53300005 | Response | Notify     | Receive Modbus responses |
 
 ### Characteristic Details
 
 **Write Characteristic (0x53300001)**:
+
 - Send Modbus RTU frames
 - Max write size: 256 bytes
 - No response expected on write
 
 **Notify Characteristic (0x53300005)**:
+
 - Receive Modbus RTU responses
 - Must enable notifications before use
 - Response includes 8-byte header + Modbus frame
@@ -109,12 +114,14 @@ Client                          Inverter
 **CRITICAL: 10-second minimum spacing between commands**
 
 Sending commands faster than 10 seconds apart causes:
+
 - Buffer overflow on inverter
 - Lost notifications
 - Corrupted responses
 - Connection instability
 
 **Recommended Timing**:
+
 - Command spacing: 12 seconds (adds safety margin)
 - Connection timeout: 10 seconds
 - Read timeout: 5 seconds
@@ -129,18 +136,21 @@ Sending commands faster than 10 seconds apart causes:
 All Modbus frames follow standard RTU format with CRC-16/MODBUS checksum.
 
 **Read Holding Registers (0x03)**:
+
 ```
 [Device ID][0x03][Start Addr Hi][Start Addr Lo]
 [Count Hi][Count Lo][CRC Lo][CRC Hi]
 ```
 
 **Write Single Register (0x06)**:
+
 ```
 [Device ID][0x06][Reg Addr Hi][Reg Addr Lo]
 [Value Hi][Value Lo][CRC Lo][CRC Hi]
 ```
 
 **Write Multiple Registers (0x10)**:
+
 ```
 [Device ID][0x10][Start Addr Hi][Start Addr Lo]
 [Count Hi][Count Lo][Byte Count][Data...][CRC Lo][CRC Hi]
@@ -149,6 +159,7 @@ All Modbus frames follow standard RTU format with CRC-16/MODBUS checksum.
 ### Response Format
 
 **Standard Response**:
+
 ```
 [8 bytes of zeros]
 [Device ID][Function Code][Byte Count][Data...][CRC Lo][CRC Hi]
@@ -157,6 +168,7 @@ All Modbus frames follow standard RTU format with CRC-16/MODBUS checksum.
 The 8-byte zero header is specific to SRNE BLE implementation.
 
 **Exception Response**:
+
 ```
 [8 bytes of zeros]
 [Device ID][Function Code + 0x80][Exception Code][CRC Lo][CRC Hi]
@@ -174,18 +186,19 @@ All SRNE inverters respond to device ID 1 on BLE interface.
 
 ### Address Ranges
 
-| Range | Type | Description | Password |
-|-------|------|-------------|----------|
-| 0x0100-0x012F | Read-Only | Real-time data | None |
-| 0xE001-0xE0FF | Read-Write | Battery settings | 4321 |
-| 0xE200-0xE2FF | Read-Write | Grid settings | 0000 |
-| 0xE300-0xE3FF | Read-Write | Software settings | 111111 |
-| 0xE400-0xE43F | Read-Write | Grid-tie (model-specific) | Varies |
-| 0xDF00-0xDFFF | Write-Only | Commands | None |
+| Range         | Type       | Description               | Password |
+| ------------- | ---------- | ------------------------- | -------- |
+| 0x0100-0x012F | Read-Only  | Real-time data            | None     |
+| 0xE001-0xE0FF | Read-Write | Battery settings          | 4321     |
+| 0xE200-0xE2FF | Read-Write | Grid settings             | 0000     |
+| 0xE300-0xE3FF | Read-Write | Software settings         | 111111   |
+| 0xE400-0xE43F | Read-Write | Grid-tie (model-specific) | Varies   |
+| 0xDF00-0xDFFF | Write-Only | Commands                  | None     |
 
 ### Key Registers
 
 **Real-Time Data (0x0100-0x012F)**:
+
 ```
 0x0100  AC Input Voltage        (0.1V)
 0x0107  Battery Voltage         (0.1V)
@@ -197,6 +210,7 @@ All SRNE inverters respond to device ID 1 on BLE interface.
 ```
 
 **Battery Settings (0xE001-0xE0FF)**:
+
 ```
 0xE001  PV Max Charge Current   (1A)
 0xE002  Battery Capacity        (1Ah)
@@ -207,6 +221,7 @@ All SRNE inverters respond to device ID 1 on BLE interface.
 ```
 
 **Commands (0xDF00-0xDFFF)**:
+
 ```
 0xDF00  Load Control            (0=Off, 1=On)
 0xDF01  Machine Reset           (1=Reset)
@@ -226,13 +241,14 @@ All SRNE inverters respond to device ID 1 on BLE interface.
 
 Many registers use fixed-point scaling:
 
-| Scale | Description | Example |
-|-------|-------------|---------|
-| 0.1 | One decimal place | 245 = 24.5V |
-| 0.01 | Two decimal places | 2456 = 24.56A |
-| 1 | No scaling | 75 = 75% |
+| Scale | Description        | Example       |
+| ----- | ------------------ | ------------- |
+| 0.1   | One decimal place  | 245 = 24.5V   |
+| 0.01  | Two decimal places | 2456 = 24.56A |
+| 1     | No scaling         | 75 = 75%      |
 
 **Conversion**:
+
 ```python
 # Read from inverter
 raw_value = 245
@@ -248,6 +264,7 @@ raw_value = int(target_voltage / 0.1)  # 245
 Some registers use enumeration:
 
 **Battery Type (0xE004)**:
+
 ```
 0 = User Defined
 1 = AGM
@@ -257,6 +274,7 @@ Some registers use enumeration:
 ```
 
 **Output Priority (0xE20C)**:
+
 ```
 0 = Solar First (SUB)
 1 = Utility First (UTI)
@@ -269,16 +287,17 @@ Some registers use enumeration:
 
 ### Exception Codes
 
-| Code | Name | Description | Action |
-|------|------|-------------|--------|
-| 0x01 | Illegal Function | Unsupported function code | Check protocol version |
-| 0x02 | Illegal Data Address | Register not supported | Cache as unsupported |
-| 0x03 | Illegal Data Value | Value out of range | Validate before write |
-| 0x0B | Permission Denied | Password required | Authenticate first |
+| Code | Name                 | Description               | Action                 |
+| ---- | -------------------- | ------------------------- | ---------------------- |
+| 0x01 | Illegal Function     | Unsupported function code | Check protocol version |
+| 0x02 | Illegal Data Address | Register not supported    | Cache as unsupported   |
+| 0x03 | Illegal Data Value   | Value out of range        | Validate before write  |
+| 0x0B | Permission Denied    | Password required         | Authenticate first     |
 
 ### Connection Errors
 
 **Timeout**:
+
 ```python
 try:
     response = await asyncio.wait_for(
@@ -291,6 +310,7 @@ except asyncio.TimeoutError:
 ```
 
 **Disconnection**:
+
 ```python
 try:
     await client.write_gatt_char(WRITE_UUID, frame)
@@ -302,11 +322,13 @@ except BleakError as err:
 ### Retry Logic
 
 **Register Reads**:
+
 - Retry up to 3 times on timeout
 - Wait 2 seconds between retries
 - Cache as failed after 3 failures
 
 **Register Writes**:
+
 - Single attempt (avoid duplicate writes)
 - Verify with immediate read-back
 - Raise error on failure
@@ -319,11 +341,11 @@ except BleakError as err:
 
 Writes to certain register ranges require authentication:
 
-| Range | Password | Description |
-|-------|----------|-------------|
-| 0xE000-0xE0FF | 4321 | Battery parameters |
-| 0xE200-0xE2FF | 0000 | Grid parameters |
-| 0xE300-0xE3FF | 111111 | Software settings |
+| Range         | Password | Description        |
+| ------------- | -------- | ------------------ |
+| 0xE000-0xE0FF | 4321     | Battery parameters |
+| 0xE200-0xE2FF | 0000     | Grid parameters    |
+| 0xE300-0xE3FF | 111111   | Software settings  |
 
 ### Authentication Process
 
@@ -332,6 +354,7 @@ Writes to certain register ranges require authentication:
 3. Re-authenticate after disconnect
 
 **Example**:
+
 ```python
 # Authenticate before write
 await self._write_register(0xE203, 4321)
@@ -360,11 +383,13 @@ voltage, current, soc = values[0], values[1], values[2]
 ```
 
 **Benefits**:
+
 - Reduces command count by 3x
 - Respects 10-second spacing
 - Faster overall update time
 
 **Limitations**:
+
 - Only works for consecutive registers
 - Some models limit batch size to 10-20 registers
 
@@ -477,16 +502,19 @@ Use Wireshark or nRF Connect to capture BLE traffic:
 ### Common Issues
 
 **No Response**:
+
 - Check notifications enabled
 - Verify 10-second command spacing
 - Ensure device connected
 
 **Corrupted Data**:
+
 - Validate CRC checksum
 - Check for buffer overflow
 - Verify frame structure
 
 **Permission Denied**:
+
 - Authenticate with password
 - Check register address range
 - Verify password is correct
@@ -512,6 +540,7 @@ Use Wireshark or nRF Connect to capture BLE traffic:
 ### Model Variations
 
 Different SRNE models support different register ranges:
+
 - Grid-tie models: 0xE400-0xE43F
 - Off-grid models: 0xE400-0xE43F unavailable
 - Older firmware: May lack some registers
@@ -522,8 +551,6 @@ Different SRNE models support different register ranges:
 
 - [Modbus RTU Specification](https://modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf)
 - [Bluetooth GATT Specification](https://www.bluetooth.com/specifications/gatt/)
-- [SRNE Protocol Documentation](REGISTER_MAPPING.md)
-
----
-
-**Last Updated**: 2026-02-05
+- [SRNE Protocol Specification v1.96](../resources/SRNE_Energy_Storage_Inverter_Protocol_v1.96.md) -
+  Vendor register reference
+- [Architecture](ARCHITECTURE.md) - Where this transport sits in the system
