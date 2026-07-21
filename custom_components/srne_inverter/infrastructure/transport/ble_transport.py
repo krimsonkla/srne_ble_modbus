@@ -106,7 +106,10 @@ class BLETransport(ITransport):
         self._learned_timeouts = timeouts
         _LOGGER.info(
             "Applied learned timeouts: %s",
-            {op: f"{val:.2f}s" for op, val in timeouts.items()},
+            {
+                op: f"{val:.2f}s" if isinstance(val, (int, float)) else str(val)
+                for op, val in timeouts.items()
+            },
         )
 
     async def connect(

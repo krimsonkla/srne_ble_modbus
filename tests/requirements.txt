@@ -5,6 +5,13 @@
 bleak>=0.21.0
 bleak-retry-connector>=3.4.0
 
+# dbus-fast: pytest-homeassistant-custom-component patches platform.system()
+# to return "Linux" for bluetooth adapter simulation, which forces
+# bleak-retry-connector's Linux-only imports at load time (dbus_fast is
+# imported unconditionally when IS_LINUX=True). Required for BLE-adjacent
+# tests to import on macOS.
+dbus-fast
+
 # Home Assistant (for testing components)
 homeassistant>=2024.11.0
 
