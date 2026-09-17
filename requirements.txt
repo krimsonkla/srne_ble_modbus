@@ -10,7 +10,7 @@
 # ==============================================================================
 # Pin to 2025.1.4 to match pytest-homeassistant-custom-component 0.13.205
 # (both must move together; the plugin pins HA exactly).
-homeassistant==2025.1.4
+homeassistant==2026.6.0
 
 # ==============================================================================
 # Integration Dependencies (from manifest.json)
