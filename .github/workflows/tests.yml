@@ -16,6 +16,11 @@ on:
     branches:
       - main
 
+# The job reads the tree and reports a status; it needs nothing else. Without
+# this the token takes the account-wide default rather than a scope stated here.
+permissions:
+  contents: read
+
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
