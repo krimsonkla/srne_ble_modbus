@@ -174,12 +174,19 @@ class RefreshDataUseCase:
                 # CRITICAL: Check connection before each batch
                 # If disconnected, stop immediately instead of processing remaining batches
                 if not self._transport.is_connected:
-                    _LOGGER.error(
+                    # Expected: the peer drops the link every ~5 min. The next
+                    # cycle reconnects, so this is a warning, not an error.
+                    _LOGGER.warning(
                         "Transport disconnected before batch %d/%d, aborting refresh",
                         i,
                         len(register_batches),
                     )
-                    # Return partial data if we collected any
+                    # Partial data is still good data. Report success so the
+                    # coordinator keeps last_update_success True -- every
+                    # entity's `available` resolves through it, so failing the
+                    # cycle takes the whole device offline in the UI for a
+                    # drop that resolves itself in ~50s. Only a cycle that
+                    # collected nothing is a real failure.
                     if data:
                         _LOGGER.info(
                             "Returning partial data: %d values from %d batches before disconnection",
@@ -188,8 +195,9 @@ class RefreshDataUseCase:
                         )
                     return RefreshDataResult(
                         data=data if data else {},
-                        success=False,
+                        success=bool(data),
                         error="Connection lost before completing all batches",
+                        connection_lost=True,
                         duration=time.time() - self._start_time,
                         failed_reads=self._failed_reads,
                         failed_registers=self._failed_registers.copy(),
@@ -225,18 +233,25 @@ class RefreshDataUseCase:
                             len(self._batch_timings),
                         )
                 except RuntimeError as err:
-                    # Connection error during read - stop processing batches
-                    _LOGGER.error(
+                    # Connection error during read - stop processing batches.
+                    #
+                    # Expected: the module closes the link about every 266s, and
+                    # a read in flight when that happens surfaces here as an
+                    # ATT 0x0e. Warning, not error -- the next cycle recovers.
+                    _LOGGER.warning(
                         "Connection lost during batch %d (0x%04X), aborting refresh: %s",
                         i,
                         int(batch.start_address),
                         err,
                     )
-                    # Return partial data collected so far
+                    # Return partial data collected so far. connection_lost lets
+                    # the coordinator merge it over the previous values, or hold
+                    # the previous values outright when nothing was collected.
                     return RefreshDataResult(
                         data=data if data else {},
-                        success=False,
+                        success=bool(data),
                         error=f"Connection lost: {err}",
+                        connection_lost=True,
                         duration=time.time() - self._start_time,
                         failed_reads=self._failed_reads,
                         failed_registers=self._failed_registers.copy(),
@@ -305,18 +320,23 @@ class RefreshDataUseCase:
                                 i,
                             )
                     except RuntimeError as err:
-                        # Connection lost during splitting - stop processing
-                        _LOGGER.error(
+                        # Connection lost during splitting - stop processing.
+                        # Same expected drop as the batch-read path above.
+                        _LOGGER.warning(
                             "Connection lost during batch split for batch %d (0x%04X), aborting refresh: %s",
                             i,
                             int(batch.start_address),
                             err,
                         )
-                        # Return partial data collected so far
+                        # Return the data collected so far. This used to return
+                        # data={} and threw away every batch that had already
+                        # succeeded, so a drop during a split lost the whole
+                        # cycle even when 19 of 20 batches had landed.
                         return RefreshDataResult(
-                            data={},
-                            success=False,
+                            data=data if data else {},
+                            success=bool(data),
                             error=f"Connection lost during split: {err}",
+                            connection_lost=True,
                             duration=time.time() - self._start_time,
                             failed_reads=self._failed_reads,
                             failed_registers=self._failed_registers.copy(),

@@ -12,7 +12,6 @@ Extracted from coordinator.
 One class per file.
 """
 
-from .write_transaction_dto import WriteTransaction
 from .transaction_manager_service import TransactionManagerService
 from .register_definition import RegisterDefinition
 from .batch_builder_service import BatchBuilderService
@@ -25,7 +24,6 @@ from .learned_timeout import LearnedTimeout
 from .timeout_learner import TimeoutLearner
 
 __all__ = [
-    "WriteTransaction",
     "TransactionManagerService",
     "RegisterDefinition",
     "BatchBuilderService",

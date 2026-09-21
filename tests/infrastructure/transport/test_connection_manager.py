@@ -148,6 +148,44 @@ class TestConnectionLost:
         assert manager.connection_state == "reconnecting"
 
     @pytest.mark.asyncio
+    async def test_handle_connection_lost_releases_transport(
+        self, manager, fake_transport
+    ):
+        """A peer drop must tear the transport down, not just update counters.
+
+        Regression: handle_connection_lost() used to only bump the failure
+        counter and move the state machine. The old BleakClient stayed alive
+        with its BLE_NOTIFY_UUID subscription attached, so the next connect()
+        stacked another subscription on top. Each reconnect then added one more
+        duplicate delivery of every notification until the bounded notification
+        queue overflowed.
+        """
+        await fake_transport.connect("AA:BB:CC:DD:EE:FF")
+        assert fake_transport.is_connected
+
+        await manager.handle_connection_lost()
+
+        assert not fake_transport.is_connected
+        assert fake_transport.last_disconnect_reason == "peer_disconnect"
+
+    @pytest.mark.asyncio
+    async def test_handle_connection_lost_survives_transport_error(self, manager):
+        """Cleanup failure must not stop the state transition.
+
+        The link is already down when this runs, so stop_notify/disconnect
+        raising is expected and must stay non-fatal.
+        """
+        boom = Mock()
+        boom.disconnect = AsyncMock(side_effect=RuntimeError("link already gone"))
+        manager._transport = boom
+
+        await manager.handle_connection_lost()
+
+        assert manager.connection_state == "reconnecting"
+        info = manager.get_failure_info()
+        assert info["consecutive_failures"] == 1
+
+    @pytest.mark.asyncio
     async def test_handle_connection_lost_increases_backoff(self, manager):
         """Test connection lost increases backoff time."""
         initial_info = manager.get_failure_info()
@@ -364,3 +402,43 @@ class TestReconnectingStateDeadlock:
         # Failures should reset on successful reconnection
         final_info = manager.get_failure_info()
         assert final_info["consecutive_failures"] == 0
+
+
+class TestDropLogSeverity:
+    """A routine 266s drop is not a warning; a repeat one is.
+
+    The module closes the link about every 266s by design, so logging that at
+    WARNING put roughly 24 lines an hour in the log describing expected
+    behaviour -- which buries the drops that actually matter.
+    """
+
+    @pytest.mark.asyncio
+    async def test_clean_drop_logs_info(self, manager, caplog):
+        """First loss with no accumulated failures: INFO."""
+        import logging
+
+        manager._address = "AA:BB:CC:DD:EE:FF"
+        with caplog.at_level(logging.INFO):
+            await manager.handle_connection_lost()
+
+        recs = [r for r in caplog.records if "Connection lost to" in r.getMessage()]
+        assert recs, "expected a connection-lost log line"
+        assert all(r.levelno == logging.INFO for r in recs), (
+            f"expected INFO, got {[r.levelname for r in recs]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_repeat_drop_logs_warning(self, manager, caplog):
+        """Once failures are stacking up it is worth a warning again."""
+        import logging
+
+        manager._address = "AA:BB:CC:DD:EE:FF"
+        manager._consecutive_failures = 2
+        with caplog.at_level(logging.INFO):
+            await manager.handle_connection_lost()
+
+        recs = [r for r in caplog.records if "Connection lost to" in r.getMessage()]
+        assert recs, "expected a connection-lost log line"
+        assert any(r.levelno == logging.WARNING for r in recs), (
+            f"expected WARNING, got {[r.levelname for r in recs]}"
+        )

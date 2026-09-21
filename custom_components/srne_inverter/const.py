@@ -82,6 +82,28 @@ BLE_WRITE_WITH_RESPONSE = True  # Use ATT Write Request (True) vs Write Command 
 # ahead of the device storing its result code. Ignored when writing with response.
 BLE_WRITE_PROCESSING_DELAY = 0.04  # Settle time after a response=False write
 
+# First write after a connect
+# The vendor's own Eco-Worthy app has a dedicated code path for this. Its
+# handshake log strings run: "first write 0x01 attempt=", "first write failed
+# attempt=", "retry write 0x01 attempt=", "first write succeeded, waiting valid
+# response", "protocol ready". The module rejects the first ATT write after a
+# fresh GATT connect often enough that the vendor retries it as a matter of
+# course. We do the same: one silent retry of the first write in a session,
+# before any teardown.
+BLE_FIRST_WRITE_RETRY_DELAY = 0.15  # Settle time before retrying the first write
+
+# Empty-cycle tolerance
+# The module closes the link about every 266s. A drop that lands on batch 1
+# leaves the cycle with nothing collected, so the partial-merge path has
+# nothing to merge and the cycle fails -- taking every entity unavailable for
+# one interval over a condition that heals itself on the next poll.
+#
+# Hold the previous values for a bounded run of such cycles instead. At a ~79s
+# cycle this is about four minutes of stale data before the device is reported
+# unavailable, which is short enough that a genuinely dead inverter still
+# surfaces and long enough to absorb the drop.
+MAX_CONSECUTIVE_EMPTY_CYCLES = 3
+
 # Circuit Breaker Configuration
 MAX_CONSECUTIVE_TIMEOUTS = 5  # Force reconnect after N consecutive timeouts
 

@@ -16,12 +16,16 @@ from bleak.exc import BleakError
 from bleak_retry_connector import (
     establish_connection,
     close_stale_connections_by_address,
+    clear_cache,
     asyncio_timeout,
 )
 from homeassistant.components import bluetooth
 
 from ...domain.interfaces import ITransport
-from ...domain.exceptions import DeviceRejectedCommandError
+from ...domain.exceptions import (
+    DeviceRejectedCommandError,
+    TransportConnectionLostError,
+)
 from ...const import (
     BLE_NOTIFY_UUID,
     BLE_WRITE_UUID,
@@ -34,6 +38,7 @@ from ...const import (
     MAX_CONSECUTIVE_TIMEOUTS,
     BLE_WRITE_WITH_RESPONSE,
     BLE_WRITE_PROCESSING_DELAY,
+    BLE_FIRST_WRITE_RETRY_DELAY,
 )
 from ..decorators import handle_transport_errors
 
@@ -86,6 +91,20 @@ class BLETransport(ITransport):
         self._address: Optional[str] = None
         self._client: Optional[BleakClient] = None
         self._notification_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=10)
+        # Guards disconnect() against re-entry. client.disconnect() makes Bleak
+        # fire disconnected_callback, which schedules handle_connection_lost(),
+        # which now calls back into disconnect(). Without this flag that second
+        # call can run stop_notify()/disconnect() on the same client while the
+        # first is still awaiting them, because _client is not cleared until the
+        # finally block.
+        self._disconnecting: bool = False
+        # True from a successful connect until the first write of that session.
+        # Gates the one-shot retry of the first write (see BLE_FIRST_WRITE_RETRY_DELAY).
+        self._first_send_after_connect: bool = False
+        # Serialises send(). One characteristic, one notification queue, and a
+        # device that will happily concatenate two replies into a single
+        # notification -- so two overlapping operations cross their responses.
+        self._send_lock: asyncio.Lock = asyncio.Lock()
         self._connected = False
 
         # Circuit breaker state
@@ -140,11 +159,44 @@ class BLETransport(ITransport):
         _connect_start = time.time()
         _LOGGER.debug("[SRNE_TRACE] connect() ENTRY addr=%s", address)
 
+        # Release any client we are still holding before building a new one.
+        #
+        # close_stale_connections_by_address() below works at the BlueZ device
+        # level; it does not run our stop_notify() path, so on its own it leaves
+        # our previous BLE_NOTIFY_UUID subscription attached to
+        # _notification_handler. Reconnect paths that skip disconnect() would
+        # then stack a second subscription on top of the first. Doing the
+        # teardown here makes connect() idempotent for every caller rather than
+        # relying on each one to clean up first.
+        if self._client is not None:
+            _LOGGER.debug(
+                "[SRNE_TRACE] connect() found existing client, releasing first"
+            )
+            await self.disconnect(reason="connect_stale_client")
+
         # CRITICAL: Close any stale connections first (Home Assistant best practice)
         # This prevents zombie connections where BleakClient reports connected
         # but the device is actually unresponsive
         _LOGGER.debug("Closing stale connections for %s", address)
         await close_stale_connections_by_address(address)
+
+        # NOT clearing the BlueZ GATT cache here, deliberately.
+        #
+        # A clear_cache(address) call lived here on 2026-09-21 and was removed
+        # the same day. It was justified by two facts that are unrelated: the
+        # vendor app calls _discoverFreshGattServices, and our stop_notify()
+        # fails with "Service Discovery has not been performed yet". The second
+        # is not stale-cache evidence -- it happens on the peer-drop path, where
+        # the link is already gone and there are no services to find.
+        #
+        # Measured over 34 clears in one afternoon: zero occurrences of the
+        # problem it was meant to help ("First write of session failed"), and
+        # one NOTIFY subscribe failure 5s after a clear ("Characteristic
+        # 53300005-... was not found!"). That failure class predates the change
+        # and also hit renogy and bms_ble, so the clear was not its cause -- but
+        # it bought no measured benefit either.
+        #
+        # Re-add only if something actually demonstrates a stale service cache.
 
         # Check if BLE adapter is ready (has active scanners)
         # This prevents unclear errors when adapter is still initializing on HA restart
@@ -222,6 +274,21 @@ class BLETransport(ITransport):
                 return False
 
             # Subscribe to NOTIFY UUID for valid responses (critical - must succeed)
+            #
+            # This fails intermittently with "Characteristic <NOTIFY_UUID> was
+            # not found!", and the cause is an adapter switch rather than
+            # anything about this device. habluetooth re-scores the adapters on
+            # every reconnect, and with two dongles it alternates: 32 switches
+            # between hci0 and hci1 in five hours on 2026-09-21, roughly one per
+            # ~266s drop. When the device lands on the other adapter, that
+            # adapter's GATT service cache is cold and start_notify can run
+            # before services resolve. Measured: all four failures that day fell
+            # within ~60s of a switch, two of them within 2s.
+            #
+            # So clear the BlueZ cache between attempts to force a fresh service
+            # discovery. Only on the retry path -- clearing on every connect was
+            # tried on 2026-09-21 and removed the same day: 34 clears, zero
+            # measured benefit. The failure, not the connect, is what warrants it.
             max_notify_attempts = 2
             for attempt in range(max_notify_attempts):
                 try:
@@ -233,6 +300,19 @@ class BLETransport(ITransport):
                     )
                     break
                 except (asyncio.TimeoutError, BleakError) as err:
+                    if attempt < max_notify_attempts - 1:
+                        try:
+                            await clear_cache(address)
+                            _LOGGER.debug(
+                                "[SRNE_TRACE] cleared GATT cache after NOTIFY "
+                                "subscribe failure on %s",
+                                address,
+                            )
+                        except Exception as cache_err:
+                            _LOGGER.debug(
+                                "clear_cache after subscribe failure skipped: %s",
+                                cache_err,
+                            )
                     if attempt == max_notify_attempts - 1:
                         _LOGGER.error(
                             "Timeout subscribing to NOTIFY_UUID after %d attempts: %s",
@@ -256,6 +336,8 @@ class BLETransport(ITransport):
             self._connected = True
             # Reset circuit breaker on successful connection
             self._consecutive_timeouts = 0
+            # Arm the one-shot retry for this session's first write.
+            self._first_send_after_connect = True
             _LOGGER.info("BLE transport connected to %s", address)
             _LOGGER.debug(
                 "[SRNE_TRACE] connect() OK addr=%s dt=%.2fs",
@@ -321,6 +403,14 @@ class BLETransport(ITransport):
             )
             return
 
+        if self._disconnecting:
+            _LOGGER.debug(
+                "[SRNE_TRACE] disconnect() NOOP reason=%s (already disconnecting)",
+                reason,
+            )
+            return
+        self._disconnecting = True
+
         try:
             # Always attempt to release the NOTIFY subscription, even when the
             # link is already down. BlueZ keeps the notify acquisition open on
@@ -356,6 +446,8 @@ class BLETransport(ITransport):
         finally:
             self._client = None
             self._connected = False
+            self._disconnecting = False
+            self._first_send_after_connect = False
             self._consecutive_timeouts = 0  # Reset circuit breaker on disconnect
             self._clear_notification_queue()
             _LOGGER.debug(
@@ -366,7 +458,41 @@ class BLETransport(ITransport):
 
     @handle_transport_errors("BLE send", reraise=True)
     async def send(
-        self, data: bytes, timeout: float = MODBUS_RESPONSE_TIMEOUT
+        self,
+        data: bytes,
+        timeout: float = MODBUS_RESPONSE_TIMEOUT,
+        without_response: bool | None = None,
+    ) -> bytes:
+        """Serialised entry point. See _send_unlocked for the protocol.
+
+        Every exchange is write -> read result code -> await notification, all
+        over one characteristic with one shared notification queue. Nothing
+        stopped two of those running at once, and overlapping them crosses the
+        replies.
+
+        Observed 2026-09-21 21:19:54. A refresh was mid-flight on batch 16 when
+        a user tapped AC Power 76ms later. The write cleared the notification
+        queue out from under the read, both wrote to the characteristic, and the
+        device answered with both frames concatenated in one notification:
+
+            010308000101900000001985 11 0106df00000173de
+            |---- func 0x03 read reply ---| |- func 0x06 write echo -|
+
+        The read consumed it and decoded its four registers; the write was left
+        with nothing and timed out. The same race, with the ATT ACK removed, is
+        what let a write report success against a read's reply earlier that day.
+
+        A plain lock is enough: send() is never called from inside send(), and
+        the longest an operation holds it for is one batch, about 0.85s.
+        """
+        async with self._send_lock:
+            return await self._send_unlocked(data, timeout, without_response)
+
+    async def _send_unlocked(
+        self,
+        data: bytes,
+        timeout: float = MODBUS_RESPONSE_TIMEOUT,
+        without_response: bool | None = None,
     ) -> bytes:
         """Send command with write-then-read error detection.
 
@@ -425,7 +551,9 @@ class BLETransport(ITransport):
         # Fail-fast connection check: Detect connection loss immediately
         # This prevents operations from hanging when BLE connection is lost
         if not self.is_connected:
-            raise RuntimeError("BLE connection lost - reconnection needed")
+            raise TransportConnectionLostError(
+                "BLE connection lost - reconnection needed"
+            )
 
         if not self._connected or not self._client:
             raise RuntimeError("Not connected to device")
@@ -464,20 +592,47 @@ class BLETransport(ITransport):
         # Phase 2: Start timing measurement
         timing_start = time.time()
 
+        # ATT write mode for this call. Callers that write a register pass
+        # without_response=True: an ATT Write Command exchanges no ATT response,
+        # so the module cannot return 0x0e on the write itself. The Modbus reply
+        # still arrives on NOTIFY either way. Reads keep the module default.
+        use_response = (
+            BLE_WRITE_WITH_RESPONSE if without_response is None else not without_response
+        )
+
+        # One silent retry for the first write of a session. See
+        # BLE_FIRST_WRITE_RETRY_DELAY -- the module rejects it often enough that
+        # the vendor app retries it as a matter of course.
+        write_attempts = 2 if self._first_send_after_connect else 1
+        self._first_send_after_connect = False
+
         try:
             # Step 1: Write command.
-            # BLE_WRITE_WITH_RESPONSE=True  -> ATT Write Request: waits for the
-            #   device ACK and may raise a device-side 0x0e here.
-            # BLE_WRITE_WITH_RESPONSE=False -> ATT Write Command: returns at once,
-            #   so a brief settle delay is applied before the read so it does not
-            #   race the device storing its result code.
-            await self._client.write_gatt_char(
-                BLE_WRITE_UUID, data, response=BLE_WRITE_WITH_RESPONSE
-            )
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug("Write issued (response=%s)", BLE_WRITE_WITH_RESPONSE)
+            # response=True  -> ATT Write Request: waits for the device ACK and
+            #   may raise a device-side 0x0e here.
+            # response=False -> ATT Write Command: returns at once, so a brief
+            #   settle delay is applied before the read so it does not race the
+            #   device storing its result code.
+            for _attempt in range(1, write_attempts + 1):
+                try:
+                    await self._client.write_gatt_char(
+                        BLE_WRITE_UUID, data, response=use_response
+                    )
+                    break
+                except BleakError as err:
+                    if _attempt >= write_attempts:
+                        raise
+                    _LOGGER.warning(
+                        "First write of session failed (%s); retrying once in %.2fs",
+                        err,
+                        BLE_FIRST_WRITE_RETRY_DELAY,
+                    )
+                    await asyncio.sleep(BLE_FIRST_WRITE_RETRY_DELAY)
 
-            if not BLE_WRITE_WITH_RESPONSE and BLE_WRITE_PROCESSING_DELAY > 0:
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Write issued (response=%s)", use_response)
+
+            if not use_response and BLE_WRITE_PROCESSING_DELAY > 0:
                 await asyncio.sleep(BLE_WRITE_PROCESSING_DELAY)
 
             # Step 2: Read characteristic to get result code.
@@ -623,7 +778,9 @@ class BLETransport(ITransport):
 
             # Force disconnect to ensure clean state
             await self.disconnect(reason="send_bleak_error")
-            raise RuntimeError(f"BLE connection lost during send: {err}") from err
+            raise TransportConnectionLostError(
+                f"BLE connection lost during send: {err}"
+            ) from err
 
         except Exception as err:
             _LOGGER.error("BLE operation failed with exception: %s", err, exc_info=True)
