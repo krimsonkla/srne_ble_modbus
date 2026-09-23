@@ -17,6 +17,7 @@ This coordinator manages:
 
 from __future__ import annotations
 
+from .domain.exceptions import TransportConnectionLostError
 import logging
 from datetime import timedelta
 from typing import Any
@@ -28,6 +29,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .domain.helpers.address_helpers import format_address
 from .const import (
+    MAX_CONSECUTIVE_EMPTY_CYCLES,
     DEFAULT_SLAVE_ID,
     DOMAIN,
 )
@@ -38,6 +40,23 @@ _LOGGER = logging.getLogger(__name__)
 # ============================================================================
 # DATA UPDATE COORDINATOR
 # ============================================================================
+
+
+def _update_failed(message: str, retry_after: int | None = None) -> UpdateFailed:
+    """Build an UpdateFailed, using retry_after only where it is supported.
+
+    retry_after landed in Home Assistant 2025.11. On an older core the kwarg
+    raises TypeError out of HomeAssistantError.__init__, which turns a handled
+    connection error into an unhandled crash inside the coordinator. The
+    integration still supports older cores (CI pins 2025.1.4), so the hint is
+    applied when available and dropped when it is not.
+    """
+    if retry_after is None:
+        return UpdateFailed(message)
+    try:
+        return UpdateFailed(message, retry_after=retry_after)
+    except TypeError:
+        return UpdateFailed(message)
 
 
 class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -114,6 +133,9 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Phase 4: Learned timeout persistence
         self._learned_timeouts: dict[str, float] = {}
         self._update_counter: int = 0
+        # Consecutive cycles that collected nothing because the link dropped.
+        # Bounded by MAX_CONSECUTIVE_EMPTY_CYCLES; see the const for why.
+        self._consecutive_empty_cycles: int = 0
 
         # Dependency tracking for calculated sensors
         self._dependency_map: dict[str, list[str]] = {}
@@ -585,8 +607,62 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 register_definitions=self._device_config.get("registers", {}),
             )
 
+            if result.success and result.connection_lost:
+                # Partial cycle: the link dropped part-way through. Merge what
+                # we got over the previous values so batches that never ran
+                # keep their last good reading instead of going None. Without
+                # this the coordinator replaces data wholesale and half the
+                # entities blank out until the next full cycle.
+                merged = dict(self.data or {})
+                merged.update(result.data)
+                _LOGGER.warning(
+                    "Partial refresh: %d of %d values updated before the link "
+                    "dropped; keeping previous values for the rest",
+                    len(result.data),
+                    len(merged),
+                )
+                return merged
+
+            if not result.success and result.connection_lost and self.data:
+                # Empty cycle: the link dropped before batch 1 returned, so
+                # there is nothing to merge. Hold the previous values for a
+                # bounded run rather than failing the cycle -- failing clears
+                # last_update_success, and every entity resolves `available`
+                # through it, so one badly-timed drop takes the whole inverter
+                # offline for an interval.
+                #
+                # Requires self.data: on the very first refresh there is
+                # nothing to hold, and reporting success with no data would
+                # hide a device that never answered at all.
+                self._consecutive_empty_cycles += 1
+                if self._consecutive_empty_cycles <= MAX_CONSECUTIVE_EMPTY_CYCLES:
+                    _LOGGER.warning(
+                        "Empty refresh %d/%d: link dropped before any value was "
+                        "read; holding previous values",
+                        self._consecutive_empty_cycles,
+                        MAX_CONSECUTIVE_EMPTY_CYCLES,
+                    )
+                    return self.data
+                _LOGGER.error(
+                    "Empty refresh %d in a row exceeds the limit of %d; "
+                    "reporting the inverter unavailable",
+                    self._consecutive_empty_cycles,
+                    MAX_CONSECUTIVE_EMPTY_CYCLES,
+                )
+                raise TransportConnectionLostError(result.error)
+
             if not result.success:
+                if result.connection_lost:
+                    # Route to the (ConnectionError, RuntimeError) handler
+                    # below, which logs a warning and asks HA to retry in 60s
+                    # -- long enough for the ~50s reconnect to finish. Raising
+                    # UpdateFailed here instead landed in the generic handler
+                    # and logged an ERROR for an expected drop.
+                    raise TransportConnectionLostError(result.error)
                 raise UpdateFailed(result.error)
+
+            # Any cycle that produced data clears the empty run.
+            self._consecutive_empty_cycles = 0
 
             # CRITICAL FIX: Persist newly discovered failed registers
             # Without this, batches are re-split every cycle
@@ -617,14 +693,14 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except TimeoutError as err:
             # Temporary issue (device busy/slow) - retry sooner
             _LOGGER.warning("Timeout communicating with inverter: %s", err)
-            raise UpdateFailed(
+            raise _update_failed(
                 f"Communication timeout: {err}",
                 retry_after=30,  # Retry in 30s instead of normal 60s interval
             ) from err
         except (ConnectionError, RuntimeError) as err:
             # Connection lost - needs time to stabilize
             _LOGGER.warning("Connection lost to inverter: %s", err)
-            raise UpdateFailed(
+            raise _update_failed(
                 f"Connection lost: {err}",
                 retry_after=60,  # Retry in 60s to allow connection recovery
             ) from err
@@ -688,6 +764,36 @@ class SRNEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         try:
             password = self._entry.data.get("inverter_password", 0)
+
+            # Reconnect on demand before a user-initiated write.
+            #
+            # The module closes the link about every 266s. Reads do not care --
+            # the next scheduled refresh calls ensure_connected() and carries
+            # on. A write is different: it arrives when a person presses a
+            # button, and if it lands in that window the transport's fail-fast
+            # is_connected check rejects it in about a millisecond.
+            #
+            # The wait is an artifact, not a physical cost. Measured over 39
+            # drops: 48.4s median from drop to the next reconnect *attempt*,
+            # but only 1.1s median for the connect itself. Nothing was
+            # reconnecting sooner because nothing asked. Asking here turns a
+            # ~50s dead button into a ~2s pause.
+            #
+            # Reads deliberately keep the old behaviour: they run on a
+            # schedule, so paying a connect on every cycle would triple the
+            # connect rate for no benefit.
+            if self._transport is not None and not self._transport.is_connected:
+                _LOGGER.info(
+                    "Write to 0x%04X arrived while the link was down; "
+                    "reconnecting before writing",
+                    register,
+                )
+                if not await self._connection_manager.ensure_connected(self._address):
+                    _LOGGER.error(
+                        "Failed to write register 0x%04X: could not reconnect",
+                        register,
+                    )
+                    return False
 
             result = await self._write_register_use_case.execute(
                 register=register,

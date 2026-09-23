@@ -422,3 +422,111 @@ class TestEdgeCases:
             # Assert
             assert success is False
             assert transport.is_connected is False
+
+
+class TestWriteModeAndFirstWriteRetry:
+    """ATT write mode per call, and the one-shot retry of a session's first write.
+
+    Both come from the vendor Eco-Worthy app (2.5.7). Its handshake log strings
+    show a dedicated path for the first write failing, then a retry, before the
+    protocol is considered ready. It also writes without response on at least
+    the OTA path.
+    """
+
+    RESPONSE = b"\x01\x03\x02\x00\x01\x79\x84"
+
+    def _ready(self, transport, client, fail_first=False):
+        """Connected transport whose write delivers the NOTIFY response.
+
+        send() clears the notification queue before writing, so the response has
+        to arrive as a side effect of the write, not be seeded beforehand.
+        """
+        transport._client = client
+        transport._connected = True
+        transport._first_send_after_connect = True
+
+        calls = {"n": 0}
+
+        async def _write(*_args, **_kwargs):
+            calls["n"] += 1
+            if fail_first and calls["n"] == 1:
+                raise BleakError("GATT Protocol Error: Unlikely Error")
+            transport._notification_queue.put_nowait(self.RESPONSE)
+
+        client.write_gatt_char = AsyncMock(side_effect=_write)
+        return client
+
+    @pytest.mark.asyncio
+    async def test_read_uses_write_request_by_default(
+        self, transport, mock_bleak_client
+    ):
+        """A plain send keeps the module default (ATT Write Request)."""
+        c = self._ready(transport, mock_bleak_client)
+        await transport.send(b"\x01\x03\x01\x00\x00\x01", timeout=1.0)
+        assert c.write_gatt_char.call_args.kwargs["response"] is True
+
+    @pytest.mark.asyncio
+    async def test_without_response_uses_write_command(
+        self, transport, mock_bleak_client
+    ):
+        """without_response=True must reach Bleak as response=False.
+
+        An ATT Write Command exchanges no ATT response, so the module cannot
+        return 0x0e on the write itself.
+        """
+        c = self._ready(transport, mock_bleak_client)
+        await transport.send(
+            b"\x01\x06\x00\x01\x00\x01", timeout=1.0, without_response=True
+        )
+        assert c.write_gatt_char.call_args.kwargs["response"] is False
+
+    @pytest.mark.asyncio
+    async def test_first_write_of_session_is_retried_once(
+        self, transport, mock_bleak_client
+    ):
+        """The module rejects the first write after a connect; retry it silently."""
+        c = self._ready(transport, mock_bleak_client, fail_first=True)
+        await transport.send(b"\x01\x03\x01\x00\x00\x01", timeout=1.0)
+        assert c.write_gatt_char.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_later_writes_are_not_retried(self, transport, mock_bleak_client):
+        """Only the first write of a session gets the free retry."""
+        self._ready(transport, mock_bleak_client)
+        transport._first_send_after_connect = False
+        mock_bleak_client.write_gatt_char = AsyncMock(
+            side_effect=BleakError("GATT Protocol Error: Unlikely Error")
+        )
+        with pytest.raises(Exception):
+            await transport.send(b"\x01\x03\x01\x00\x00\x01", timeout=1.0)
+        assert mock_bleak_client.write_gatt_char.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retry_is_armed_once_per_connect(self, transport, mock_bleak_client):
+        """The flag is consumed by the first send, not by every send."""
+        self._ready(transport, mock_bleak_client)
+        await transport.send(b"\x01\x03\x01\x00\x00\x01", timeout=1.0)
+        assert transport._first_send_after_connect is False
+
+
+class TestConnectHelpersAreBound:
+    """Names used inside connect() must actually be imported.
+
+    Regression: clear_cache was called in connect() but never imported. The
+    call sits inside a best-effort try/except, so the NameError was swallowed
+    and logged at debug -- the feature silently did nothing for a full deploy
+    cycle. A missing name is not a runtime condition; assert it at import time.
+    """
+
+    def test_connect_helper_names_are_importable(self):
+        from custom_components.srne_inverter.infrastructure.transport import (
+            ble_transport as mod,
+        )
+
+        for name in (
+            "establish_connection",
+            "close_stale_connections_by_address",
+            "clear_cache",
+            "asyncio_timeout",
+        ):
+            assert callable(getattr(mod, name, None)), f"{name} is not bound"

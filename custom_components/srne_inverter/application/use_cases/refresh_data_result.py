@@ -20,6 +20,10 @@ class RefreshDataResult:
         duration: Time taken for refresh (seconds)
         failed_reads: Number of failed read attempts
         failed_registers: Set of register addresses that are permanently unsupported
+        connection_lost: True when the refresh stopped because the BLE link
+            dropped mid-cycle, rather than because of a data or protocol
+            fault. Lets the coordinator pick the right severity and retry
+            delay instead of treating an expected drop as an unknown error.
     """
 
     data: Dict[str, Any]
@@ -28,3 +32,4 @@ class RefreshDataResult:
     duration: float = 0.0
     failed_reads: int = 0
     failed_registers: Set[int] = field(default_factory=set)
+    connection_lost: bool = False
