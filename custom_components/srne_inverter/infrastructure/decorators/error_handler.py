@@ -7,7 +7,10 @@ from typing import Any, Callable
 
 from bleak import BleakError
 
-from ...domain.exceptions import DeviceRejectedCommandError
+from ...domain.exceptions import (
+    DeviceRejectedCommandError,
+    TransportConnectionLostError,
+)
 
 
 def handle_transport_errors(
@@ -52,6 +55,15 @@ def handle_transport_errors(
             except DeviceRejectedCommandError as err:
                 # Expected device error - log without stack trace
                 log.error("%s device error: %s", operation_name, err)
+                if reraise:
+                    raise
+                return default_return
+            except TransportConnectionLostError as err:
+                # Expected transient - the peer drops the link every ~5 min and
+                # the next coordinator cycle recovers. Logging this at ERROR
+                # with a traceback buried the real signal and surfaced in the
+                # HA UI as though something had broken.
+                log.warning("%s connection lost: %s", operation_name, err)
                 if reraise:
                     raise
                 return default_return

@@ -56,11 +56,17 @@ class FakeTransport(ITransport):
         # Note: disconnected_callback is accepted but not used in fake transport
         return True
 
-    async def disconnect(self) -> None:
+    async def disconnect(self, reason: str = "unknown") -> None:
         """Simulate disconnection."""
+        self.last_disconnect_reason = reason
         self._connected = False
 
-    async def send(self, data: bytes, timeout: float = 5.0) -> bytes:
+    async def send(
+        self,
+        data: bytes,
+        timeout: float = 5.0,
+        without_response: bool | None = None,
+    ) -> bytes:
         """Simulate sending data and receiving response.
 
         Args:

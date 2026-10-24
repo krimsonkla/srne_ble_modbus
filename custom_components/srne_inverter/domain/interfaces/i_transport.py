@@ -46,8 +46,13 @@ class ITransport(ABC):
         """
 
     @abstractmethod
-    async def disconnect(self) -> None:
+    async def disconnect(self, reason: str = "unknown") -> None:
         """Close connection to device.
+
+        Args:
+            reason: Short tag naming the caller, surfaced in SRNE_TRACE logs so
+                integration-initiated teardowns can be told apart from
+                peer/link-layer drops.
 
         This method should be idempotent (safe to call multiple times).
         After disconnect, is_connected should return False.
@@ -58,7 +63,12 @@ class ITransport(ABC):
         """
 
     @abstractmethod
-    async def send(self, data: bytes, timeout: float = 5.0) -> bytes:
+    async def send(
+        self,
+        data: bytes,
+        timeout: float = 5.0,
+        without_response: bool | None = None,
+    ) -> bytes:
         """Send data and receive response.
 
         This is a synchronous request-response operation:

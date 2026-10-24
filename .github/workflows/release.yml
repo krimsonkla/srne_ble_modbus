@@ -1,0 +1,160 @@
+name: Release
+
+# Publishes a GitHub Release when a version tag is pushed.
+#
+# WHY THIS EXISTS: HACS decides whether to show a version number or a commit
+# SHA purely by whether the repo has any releases, and it builds the changelog
+# it displays from each release's BODY — not from CHANGELOG.md. See
+# custom_components/hacs/update.py::async_release_notes. So the release body is
+# the only changelog users ever see, and this workflow copies it out of
+# CHANGELOG.md so the two cannot drift.
+#
+# SECURITY NOTES — read before editing:
+#
+#   * Trigger is `push` on a tag. It is deliberately NOT `pull_request_target`
+#     or `workflow_run`, the two triggers that run with repository write scope
+#     against attacker-supplied code. Pushing a tag already requires write
+#     access, so the trusted-actor boundary is the one git already enforces.
+#   * Default permission is `contents: read`. Only the publish job widens to
+#     `contents: write`, which is the minimum the Releases API accepts.
+#   * Every action is pinned to a full commit SHA, not a moving tag. A tag like
+#     `@v4` is mutable by the action's owner; a SHA is not.
+#   * `persist-credentials: false` keeps the job token out of .git/config, so a
+#     later step — or anything it shells out to — cannot reuse it.
+#   * No third-party actions. The `gh` CLI is preinstalled on GitHub runners,
+#     which keeps the supply chain down to actions/checkout alone.
+#   * Nothing interpolates `${{ }}` into a shell body. Expressions are
+#     substituted textually BEFORE the shell parses the line, so a crafted tag
+#     name could close the quoting and append its own commands. Values reach
+#     the shell through `env:` and are read back as quoted variables instead.
+#   * The tag must be reachable from `main`, so a tag pushed onto an unmerged
+#     side branch cannot publish a release.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One publish at a time per tag. Deliberately not cancel-in-progress: a
+  # half-created release is worse than a queued one.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Forks inherit workflows. Without this, a fork that pushes a tag runs this
+    # against its own repo — harmless, but it burns minutes and sends confusing
+    # failure mail to the fork owner.
+    if: github.repository == 'krimsonkla/srne_ble_modbus'
+
+    permissions:
+      contents: write # create a release and read the tag; nothing else
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Full history so the ancestry check below can see main.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve and validate the version
+        id: version
+        env:
+          # github.ref_name reaches the shell as data, never as script text.
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # Accept only a strict semver tag. This runs before the value is used
+          # anywhere else, so anything exotic stops here.
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Tag '$TAG' is not a vMAJOR.MINOR.PATCH tag."
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+
+          # The tag must describe the code on main. A tag on an unmerged branch
+          # would otherwise publish whatever that branch happens to contain.
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag '$TAG' is not reachable from main; refusing to publish."
+            exit 1
+          fi
+
+          # manifest.json is what Home Assistant reports as the installed
+          # version. If it disagrees with the tag, users see one number in HACS
+          # and a different one in HA.
+          MANIFEST_VERSION="$(
+            python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' \
+              custom_components/srne_inverter/manifest.json
+          )"
+          if [ "$MANIFEST_VERSION" != "$VERSION" ]; then
+            echo "::error::manifest.json says '$MANIFEST_VERSION' but the tag says '$VERSION'."
+            exit 1
+          fi
+
+          printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+          printf 'tag=%s\n' "$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Extract the changelog section for this version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Reads VERSION from the environment rather than from an interpolated
+          # literal, and writes to a file so the body never transits an
+          # argument list.
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+
+          version = os.environ["VERSION"]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+
+          # Body runs from this version's heading to whichever comes first: the
+          # next version heading, the trailing link-reference block, or EOF.
+          # Without the link-reference terminator the newest section — which has
+          # no heading after it — swallows the "[0.6.0]: https://..." footer.
+          pattern = re.compile(
+              r"^## \[%s\][^\n]*\n(?P<body>.*?)(?=^## \[|^\[[^\]]+\]:|\Z)"
+              % re.escape(version),
+              re.MULTILINE | re.DOTALL,
+          )
+          match = pattern.search(text)
+          if not match:
+              sys.exit(f"CHANGELOG.md has no '## [{version}]' section.")
+
+          body = match.group("body").strip()
+          if not body:
+              sys.exit(f"The '## [{version}]' section in CHANGELOG.md is empty.")
+
+          with open("release-notes.md", "w", encoding="utf-8") as handle:
+              handle.write(body + "\n")
+          print(f"Extracted {len(body)} characters for {version}.")
+          PY
+
+      - name: Create the release
+        env:
+          # The token is scoped by the job-level `permissions` block above.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # --verify-tag: publish only a tag that already exists on the remote,
+          # so a typo cannot create a new tag as a side effect.
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$VERSION" \
+            --notes-file release-notes.md \
+            --verify-tag

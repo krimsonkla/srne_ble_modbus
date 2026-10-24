@@ -107,7 +107,20 @@ class ConnectionManager(IConnectionManager):
         except Exception:
             pass  # RSSI not available on this platform
 
-        _LOGGER.warning(
+        # INFO, not WARNING, on a clean first drop.
+        #
+        # The SRNE BT-2 closes the link on its own roughly every 266s -- a
+        # device-side timer, confirmed by experiment: forcing 50% more traffic
+        # into a session left the drop time unchanged, and a JBD BMS on the same
+        # adapter holds a connection for 12 hours. The vendor's own app has no
+        # keepalive either, only recovery. Reconnect costs about 1s of work and
+        # 0.9s of data latency.
+        #
+        # Logging that at WARNING put ~24 lines an hour in the log describing
+        # expected behaviour, which buries the drops that are NOT expected.
+        # A repeat drop while failures are already accumulating still warns.
+        _log = _LOGGER.warning if self._consecutive_failures else _LOGGER.info
+        _log(
             "BLE disconnect callback triggered - Address: %s, Client connected state: %s, RSSI: %s, "
             "Current failures: %d, Current state: %s",
             client_address,
@@ -264,7 +277,38 @@ class ConnectionManager(IConnectionManager):
             >>> await manager.handle_connection_lost()
             >>> assert manager.connection_state == "reconnecting"
         """
-        _LOGGER.warning("Connection lost to %s", self._address)
+        # INFO on a clean first loss, WARNING once failures are stacking up.
+        # See _handle_disconnect for why the routine drop is not a warning.
+        if self._consecutive_failures:
+            _LOGGER.warning(
+                "Connection lost to %s (consecutive failures: %d)",
+                self._address,
+                self._consecutive_failures,
+            )
+        else:
+            _LOGGER.info("Connection lost to %s", self._address)
+
+        # Release the transport before anything else.
+        #
+        # Without this, a peer-initiated drop left the old BleakClient (and its
+        # BLE_NOTIFY_UUID subscription) alive: nothing called transport
+        # .disconnect(), so stop_notify() never ran and BlueZ kept the notify
+        # acquisition open. The next connect() built a fresh client and
+        # subscribed again, while the orphaned subscription stayed bound to the
+        # same _notification_handler. Every reconnect therefore added one more
+        # duplicate delivery of each notification -- observed as 9 to 18
+        # byte-identical notifications arriving in the same millisecond,
+        # climbing by one per reconnect until the maxsize=10 notification queue
+        # overflowed ("Notification queue full, dropping old data").
+        #
+        # disconnect() swallows stop_notify/disconnect errors as non-critical,
+        # so calling it on an already-dead link is safe and is exactly the case
+        # its comment was written for.
+        try:
+            await self._transport.disconnect(reason="peer_disconnect")
+        except Exception as err:  # never let cleanup mask the state transition
+            _LOGGER.debug("Transport release after peer drop failed: %s", err)
+
         self._consecutive_failures += 1
         self._backoff_time = min(self._backoff_time * 2, self.MAX_BACKOFF)
 

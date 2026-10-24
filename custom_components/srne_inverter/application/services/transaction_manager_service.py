@@ -1,22 +1,24 @@
 """TransactionManagerService for managing write operations.
 
-This service manages the queue of write operations and tracks failed registers.
-It handles:
-- Write queue management
-- Failed register persistence
-- Batch rebuild coordination
+This service tracks failed registers and signals when read batches need
+rebuilding.
 
-Extracted from coordinator write queue logic.
-Application Layer Extraction
-Extracted WriteTransaction DTO
+It used to own a write queue as well -- queue_write/next_transaction/
+has_pending_writes/get_queue_size over an asyncio.Queue. That queue was
+removed on 2026-09-21 because nothing outside its own unit tests ever called
+it: coordinator.async_write_register() went straight to
+WriteRegisterUseCase.execute(), so writes were never queued and never drained.
+It read like coordination that existed, which is worse than none.
+
+Overlapping reads and writes are serialised at the transport instead --
+see BLETransport.send() -- which costs a write about one batch of waiting
+(~0.85s) rather than up to a full refresh cycle (~19s).
 """
 
 import logging
-import asyncio
 from typing import Set, Optional
 
 from ...domain.interfaces import IFailedRegisterRepository
-from .write_transaction_dto import WriteTransaction
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,20 +26,18 @@ _LOGGER = logging.getLogger(__name__)
 class TransactionManagerService:
     """Service for managing write transactions and failed registers.
 
-    This service coordinates write operations and maintains state
-    about which registers have failed and should be excluded from reads.
+    Maintains state about which registers have failed and should be excluded
+    from reads.
 
     Responsibilities:
-    - Queue write operations
     - Track failed registers
     - Persist failed register state
     - Signal when batches need rebuilding
 
     Example:
         >>> manager = TransactionManagerService(repository)
-        >>> await manager.queue_write(0x0100, 5000)
-        >>> transaction = await manager.next_transaction()
         >>> await manager.mark_register_failed(0x0200)
+        >>> failed = manager.get_failed_registers()
     """
 
     def __init__(
@@ -50,93 +50,8 @@ class TransactionManagerService:
             failed_register_repository: Repository for persisting failed registers
         """
         self._repository = failed_register_repository
-        self._write_queue: asyncio.Queue[WriteTransaction] = asyncio.Queue(maxsize=20)
         self._failed_registers: Set[int] = set()
         self._batches_need_rebuild = False
-
-    async def queue_write(
-        self,
-        register: int,
-        value: int,
-        priority: int = 0,
-    ) -> bool:
-        """Queue a write transaction.
-
-        Args:
-            register: Register address
-            value: Value to write
-            priority: Priority (lower = higher priority)
-
-        Returns:
-            True if queued successfully, False if queue full
-
-        Example:
-            >>> success = await manager.queue_write(0x0100, 5000)
-            >>> assert success is True
-        """
-        transaction = WriteTransaction(
-            register=register,
-            value=value,
-            priority=priority,
-        )
-
-        try:
-            self._write_queue.put_nowait(transaction)
-            _LOGGER.debug(
-                "Queued write: 0x%04X = 0x%04X (priority=%d)",
-                register,
-                value,
-                priority,
-            )
-            return True
-        except asyncio.QueueFull:
-            _LOGGER.error(
-                "Write queue full, cannot queue write to 0x%04X",
-                register,
-            )
-            return False
-
-    async def next_transaction(self) -> Optional[WriteTransaction]:
-        """Get next write transaction from queue.
-
-        This is non-blocking. Returns None if queue empty.
-
-        Returns:
-            Next transaction or None if queue empty
-
-        Example:
-            >>> transaction = await manager.next_transaction()
-            >>> if transaction:
-            ...     # Process write
-        """
-        try:
-            return self._write_queue.get_nowait()
-        except asyncio.QueueEmpty:
-            return None
-
-    def has_pending_writes(self) -> bool:
-        """Check if there are pending write transactions.
-
-        Returns:
-            True if queue has pending writes
-
-        Example:
-            >>> if manager.has_pending_writes():
-            ...     transaction = await manager.next_transaction()
-        """
-        return not self._write_queue.empty()
-
-    def get_queue_size(self) -> int:
-        """Get current write queue size.
-
-        Returns:
-            Number of pending writes
-
-        Example:
-            >>> size = manager.get_queue_size()
-            >>> print(f"{size} writes pending")
-        """
-        return self._write_queue.qsize()
 
     async def mark_register_failed(self, register: int) -> None:
         """Mark a register as failed.
@@ -311,7 +226,6 @@ class TransactionManagerService:
             >>> print(f"Failed registers: {stats['failed_registers_count']}")
         """
         return {
-            "pending_writes": self.get_queue_size(),
             "failed_registers_count": len(self._failed_registers),
             "failed_registers": [f"0x{r:04X}" for r in sorted(self._failed_registers)],
             "needs_batch_rebuild": self._batches_need_rebuild,

@@ -3783,7 +3783,7 @@ registers:
     type: read
     length: 1
     data_type: uint16
-    scaling: 1
+    scaling: 0.1
     unit: V
     description: Inverter output voltage
   inverter_current:
@@ -3983,7 +3983,7 @@ registers:
     type: read
     length: 1
     data_type: uint16
-    scaling: 1
+    scaling: 0.1
     unit: V
     description: Inverter output voltage phase B (3-phase systems only)
   inverter_voltage_c:
@@ -3992,7 +3992,7 @@ registers:
     type: read
     length: 1
     data_type: uint16
-    scaling: 1
+    scaling: 0.1
     unit: V
     description: Inverter output voltage phase C (3-phase systems only)
   inverter_current_b:

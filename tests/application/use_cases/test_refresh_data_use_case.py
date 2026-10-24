@@ -429,6 +429,98 @@ class TestRefreshDataUseCase:
         # (previously returned success with empty data).
         assert result.success is False
         assert "connection lost" in result.error.lower()
+        # Flagged so the coordinator can raise TransportConnectionLostError and
+        # route this to the warning + retry-in-60s branch. Without the flag it
+        # fell through to the generic handler and logged an ERROR for what is
+        # an expected drop (the peer resets the link every ~5 min).
+        assert result.connection_lost is True
+
+    async def test_partial_refresh_reports_success(
+        self, use_case, mock_connection_manager, mock_transport, mock_protocol
+    ):
+        """A cycle cut short mid-way keeps the values it already collected.
+
+        Regression: the abort used to return success=False even when batches
+        had already landed. The coordinator turned that into UpdateFailed,
+        which clears last_update_success -- and every entity resolves
+        `available` through it, so one dropped link took the whole device
+        offline in the UI for something that recovers in ~50s.
+        """
+        batches = [
+            _make_batch(start_address=0x0100, count=1, register_map={0: "voltage"}),
+            _make_batch(start_address=0x0200, count=1, register_map={0: "current"}),
+        ]
+        register_defs = {
+            "voltage": {"scaling": 0.1, "offset": 0, "data_type": "uint16"},
+            "current": {"scaling": 0.1, "offset": 0, "data_type": "uint16"},
+        }
+
+        # Connected for the first batch, gone before the second.
+        states = iter([True, True, False, False, False, False])
+
+        class _Flaky:
+            def __init__(self, inner):
+                self._inner = inner
+
+            @property
+            def is_connected(self):
+                return next(states, False)
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        use_case._transport = _Flaky(mock_transport)
+        mock_transport.send.return_value = b"\x01\x03\x02\x09\xc4"
+        mock_protocol.decode_response.return_value = {"values": [2500]}
+
+        result = await use_case.execute(
+            device_address="AA:BB:CC:DD:EE:FF",
+            register_batches=batches,
+            register_definitions=register_defs,
+        )
+
+        # Partial, but usable -- and flagged so the coordinator merges it.
+        assert result.success is True
+        assert result.connection_lost is True
+        assert result.data, "expected the completed batch to be retained"
+
+    @pytest.mark.asyncio
+    async def test_connection_error_mid_read_is_flagged(
+        self, use_case, mock_connection_manager, mock_transport, mock_protocol
+    ):
+        """A RuntimeError during a batch read must flag connection_lost.
+
+        Regression: three abort paths existed and only the is_connected
+        pre-check set connection_lost. The other two fire on a RuntimeError
+        mid-read -- which is what an ATT 0x0e produces -- so the coordinator
+        saw an unflagged failure and took every entity unavailable. Observed
+        live at 21:41:48 on 2026-09-21.
+        """
+        batches = [
+            _make_batch(start_address=0x0100, count=1, register_map={0: "voltage"}),
+            _make_batch(start_address=0x0200, count=1, register_map={0: "current"}),
+        ]
+        register_defs = {
+            "voltage": {"scaling": 0.1, "offset": 0, "data_type": "uint16"},
+            "current": {"scaling": 0.1, "offset": 0, "data_type": "uint16"},
+        }
+        mock_transport.send = AsyncMock(
+            side_effect=[
+                b"\x01\x03\x02\x09\xc4",
+                RuntimeError("BLE connection lost during send"),
+            ]
+        )
+        mock_protocol.decode_response.return_value = {"values": [2500]}
+
+        result = await use_case.execute(
+            device_address="AA:BB:CC:DD:EE:FF",
+            register_batches=batches,
+            register_definitions=register_defs,
+        )
+
+        assert result.connection_lost is True
+        assert result.data, "the batch that already landed must be retained"
+        assert result.success is True, "partial data is a partial success"
 
     @pytest.mark.asyncio
     async def test_unexpected_exception(self, use_case, mock_connection_manager):
@@ -646,10 +738,13 @@ class TestConnectionDropRecovery:
     async def test_no_partial_data_on_connection_failure(
         self, use_case, mock_transport, mock_protocol
     ):
-        """Test that partial data is not returned on connection failure.
+        """Half-read values from the FAILING batch must not leak.
 
-        When connection fails mid-batch, the result should indicate failure
-        without returning incomplete data.
+        Note the scope: batches that already completed before the drop ARE
+        retained (see test_connection_error_mid_read_is_flagged) so the
+        coordinator can merge them. What must not leak is a partially decoded
+        value from the batch that failed. This test has a single batch, so
+        there is no prior data and result.data carries no register values.
         """
         # Arrange
         batches = [

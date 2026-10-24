@@ -182,7 +182,11 @@ class WriteRegisterUseCase:
         )
 
         try:
-            # Send authentication
+            # Send authentication.
+            # NOTE: deliberately uses the default ATT Write Request. Writing
+            # without response removes the ATT ACK that gates the follow-up
+            # result-code read, which let a write consume a notification
+            # belonging to an in-flight read. See the revert note below.
             response = await self._transport.send(
                 command, timeout=MODBUS_RESPONSE_TIMEOUT
             )
@@ -318,6 +322,18 @@ class WriteRegisterUseCase:
             except Exception as err:
                 # Non-timeout exception — connection error, protocol error, etc.
                 # Don't retry, surface immediately.
+                #
+                # REVERTED 2026-09-21. A retry branch for
+                # TransportConnectionLostError was added here and removed the
+                # same day. It made things worse: that exception covers BOTH
+                # "the module rejected the write" (worth retrying, which is what
+                # the vendor app does) AND "the fail-fast is_connected check saw
+                # a dead link" (not worth retrying -- the link needs ~50s to come
+                # back, and three 2s retries just delay a certain failure by 4s
+                # while the user waits on a switch that will not move).
+                #
+                # Distinguishing the two needs separate exception types at the
+                # transport, not a retry here.
                 _LOGGER.error("Failed to write register 0x%04X: %s", register, err)
                 return WriteRegisterResult(
                     success=False,
